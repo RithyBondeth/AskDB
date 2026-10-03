@@ -90,7 +90,7 @@ export default function UploadDialog({
       <div className="card animate-pop-in relative w-full max-w-lg p-5 shadow-2xl">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h2 className="text-xl font-bold">Upload your data</h2>
+            <h2 className="font-hand text-4xl leading-none font-bold">Upload your data</h2>
             <p className="mt-1 text-sm text-muted">
               A SQLite database, or one or more CSV files. Each CSV becomes a table you can join.
             </p>
@@ -123,11 +123,13 @@ export default function UploadDialog({
           className={`mt-2 flex w-full flex-col items-center gap-1.5 rounded-[16px_20px_14px_22px/20px_14px_22px_16px] border-2 border-dashed px-4 py-6 text-center transition ${
             dragging
               ? "border-accent bg-accent-soft"
-              : "border-line bg-surface-2 hover:border-ink hover:bg-note-yellow"
+              : "border-ink bg-surface-2 hover:bg-note-yellow"
           }`}
         >
           <FileUp className="size-6" strokeWidth={2.25} />
-          <span className="font-semibold">Drop files here or click to browse</span>
+          <span className="font-hand text-2xl leading-none font-bold">
+            Drop files here or click to browse
+          </span>
           <span className="text-xs text-subtle">
             .db · .sqlite · .sqlite3 · .csv · .tsv — up to {maxMb} MB
           </span>
@@ -180,7 +182,7 @@ export default function UploadDialog({
             onChange={(e) => setName(e.target.value)}
             maxLength={80}
             placeholder={files[0]?.name.replace(/\.[^.]+$/, "") ?? "My data"}
-            className="sketch-sm mt-1 w-full bg-surface px-3 py-2 outline-none placeholder:text-subtle focus:border-ink"
+            className="sketch-sm mt-1 w-full bg-surface px-3 py-2 outline-none placeholder:text-subtle focus:shadow-[2px_2px_0_var(--ink)]"
           />
         </label>
 

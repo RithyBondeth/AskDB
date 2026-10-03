@@ -54,7 +54,7 @@ export default function ResultTable({
     return (
       <div className="flex flex-col items-center gap-1 px-4 py-6 text-center">
         <Doodle name="float" className="w-44" />
-        <p className="font-bold">Nothing here</p>
+        <p className="font-hand text-2xl font-bold">Nothing here</p>
         <p className="text-sm text-muted">The query ran but returned no rows.</p>
       </div>
     );

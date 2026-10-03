@@ -31,7 +31,7 @@ export default function ResultPanel({
 
   return (
     <div className="sketch overflow-hidden">
-      <div className="flex flex-wrap items-center gap-1 border-b border-line bg-surface-2 px-1.5 py-1.5">
+      <div className="flex flex-wrap items-center gap-1 border-b-2 border-ink bg-surface-2 px-1.5 py-1.5">
         {hasChart && !single && (
           <TabButton
             active={activeTab === "chart"}
@@ -81,7 +81,7 @@ export default function ResultPanel({
                 onChange={(e) => setFilter(e.target.value)}
                 placeholder="Filter rows"
                 aria-label="Filter rows"
-                className="sketch-sm w-32 bg-surface py-1 pr-2 pl-7 text-xs outline-none placeholder:text-subtle focus:border-ink sm:w-40"
+                className="sketch-sm w-32 bg-surface py-1 pr-2 pl-7 text-xs outline-none placeholder:text-subtle focus:shadow-[2px_2px_0_var(--ink)] sm:w-40"
               />
             </label>
           )}
@@ -154,7 +154,7 @@ function TabButton({
       aria-pressed={active}
       className={`inline-flex items-center gap-1.5 rounded-[9px_12px_8px_13px/12px_8px_13px_9px] border-[1.5px] px-3 py-1 text-sm transition ${
         active
-          ? "border-line bg-surface font-semibold text-foreground"
+          ? "border-ink bg-surface font-medium text-foreground shadow-[2px_2px_0_var(--ink)]"
           : "border-transparent text-muted hover:text-foreground"
       }`}
     >

@@ -1,12 +1,12 @@
 "use client";
 
 import {
-  Check,
   ChevronRight,
+  Clock,
   CornerDownRight,
   Link2,
   RotateCcw,
-  ShieldCheck,
+  Rows3,
   Sparkles,
   TriangleAlert,
   User,
@@ -52,10 +52,10 @@ export default function TurnView({
     >
       {/* Question */}
       <div className="flex justify-end gap-2.5">
-        <p className="sketch relative max-w-[85%] bg-note-yellow px-4 py-2.5 text-[16px]">
+        <p className="sketch relative max-w-[85%] bg-note-yellow px-4 py-2.5 text-[16px] shadow-[3px_3px_0_var(--ink)]">
           {turn.question}
           {/* speech-bubble tail */}
-          <span className="absolute top-3 -right-[8px] size-3.5 rotate-45 border-t-[1.5px] border-r-[1.5px] border-line bg-note-yellow" />
+          <span className="absolute -right-[9px] top-3 size-4 rotate-45 border-t-2 border-r-2 border-ink bg-note-yellow" />
         </p>
         <span className="sketch hidden size-9 shrink-0 place-items-center bg-surface sm:grid">
           <User className="size-4" strokeWidth={2.25} />
@@ -68,24 +68,18 @@ export default function TurnView({
           <Sparkles className="size-4" strokeWidth={2.25} />
         </span>
         <div className="card min-w-0 flex-1 p-4 sm:p-5">
-          {/* One quiet line of facts; details live in the SQL tab. */}
-          <div className="mb-3 flex items-center gap-1.5 text-xs text-subtle">
-            {status === "done" && data && (
-              <span title="Validated and run read-only" className="shrink-0">
-                <ShieldCheck className="size-3.5 text-success" strokeWidth={2.25} />
-              </span>
-            )}
-            <span className="truncate">
-              {model.split("/").at(-1)} · {elapsed.toFixed(1)}s
-              {data && (
-                <>
-                  {" "}
-                  · {data.rows.length}
-                  {data.truncated ? "+" : ""} {data.rows.length === 1 ? "row" : "rows"}
-                </>
-              )}
+          <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-muted">
+            <span className="max-w-[16rem] truncate font-mono text-foreground">
+              {model.split("/").at(-1)}
             </span>
-            <span className="ml-auto flex shrink-0 items-center">
+            <Meta icon={Clock}>{elapsed.toFixed(1)}s</Meta>
+            {data && (
+              <Meta icon={Rows3}>
+                {data.rows.length}
+                {data.truncated ? "+" : ""} {data.rows.length === 1 ? "row" : "rows"}
+              </Meta>
+            )}
+            <span className="ml-auto flex items-center gap-0.5">
               {status !== "running" && (
                 <IconButton label="Ask again" onClick={onRetry} disabled={busy}>
                   <RotateCcw className="size-3.5" />
@@ -95,17 +89,16 @@ export default function TurnView({
             </span>
           </div>
 
-          {/* The pipeline is shown while it works, or when it failed. */}
-          {status !== "done" && <LivePipeline turn={turn} />}
+          <LivePipeline turn={turn} />
 
           {status === "running" && (
             <div
               className="mt-4 flex flex-col items-center gap-1 py-2 sm:flex-row sm:gap-6"
               aria-live="polite"
             >
-              <Doodle name="meditating" className="animate-float w-32 shrink-0 sm:w-36" />
+              <Doodle name="meditating" className="animate-float w-44 shrink-0 sm:w-52" />
               <div className="text-center sm:text-left">
-                <p className="text-lg font-bold">
+                <p className="font-hand text-3xl font-bold">
                   Thinking
                   <span className="typing-dot">.</span>
                   <span className="typing-dot [animation-delay:0.15s]">.</span>
@@ -125,7 +118,7 @@ export default function TurnView({
           {status === "done" && data && (
             <div className="mt-4 flex flex-col gap-3">
               {data.explanation && (
-                <p className="text-[15px] leading-relaxed text-foreground/80">{data.explanation}</p>
+                <p className="text-sm leading-relaxed text-muted">{data.explanation}</p>
               )}
               <ResultPanel
                 key={data.sql}
@@ -153,9 +146,9 @@ export default function TurnView({
           {status === "error" && error && (
             <div className="mt-4 flex flex-col gap-3">
               <div className="flex flex-col items-center gap-2 sm:flex-row sm:gap-5">
-                <Doodle name="clumsy" className="w-28 shrink-0" />
+                <Doodle name="clumsy" className="animate-wiggle w-40 shrink-0" />
                 <div className="sketch-sm min-w-0 flex-1 bg-danger-soft p-3.5 text-sm">
-                  <p className="flex items-center gap-1.5 font-bold text-danger">
+                  <p className="flex items-center gap-1.5 font-hand text-2xl leading-none font-bold text-danger">
                     <TriangleAlert className="size-4.5" strokeWidth={2.5} />
                     Oops, couldn’t answer that
                   </p>
@@ -210,6 +203,15 @@ function useElapsed(turn: Turn): number {
   return Math.max(0, (now - turn.startedAt) / 1000);
 }
 
+function Meta({ icon: Icon, children }: { icon: typeof Clock; children: React.ReactNode }) {
+  return (
+    <span className="sketch-sm inline-flex items-center gap-1 bg-surface-2 px-2 py-0.5 tabular-nums">
+      <Icon className="size-3" />
+      {children}
+    </span>
+  );
+}
+
 function IconButton({
   label,
   onClick,
@@ -228,7 +230,7 @@ function IconButton({
       aria-label={label}
       onClick={onClick}
       disabled={disabled}
-      className="grid size-7 place-items-center rounded-md text-subtle transition hover:bg-surface-2 hover:text-foreground disabled:opacity-40"
+      className="grid size-7 place-items-center rounded-md text-muted transition hover:bg-surface-2 hover:text-foreground disabled:opacity-40"
     >
       {children}
     </button>
@@ -240,16 +242,16 @@ function ShareButton({ onShare }: { onShare: () => Promise<void> }) {
   return (
     <button
       type="button"
-      title={done ? "Link copied" : "Copy a link that asks this question"}
-      aria-label="Share"
+      title="Copy a link that asks this question"
       onClick={async () => {
         await onShare();
         setDone(true);
         setTimeout(() => setDone(false), 1500);
       }}
-      className="grid size-7 place-items-center rounded-md text-subtle transition hover:bg-surface-2 hover:text-foreground"
+      className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-muted transition hover:bg-surface-2 hover:text-foreground"
     >
-      {done ? <Check className="size-3.5 text-success" /> : <Link2 className="size-3.5" />}
+      <Link2 className="size-3.5" />
+      {done ? "Link copied" : "Share"}
     </button>
   );
 }

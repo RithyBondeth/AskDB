@@ -67,7 +67,7 @@ export default function LivePipeline({ turn }: { turn: Turn }) {
                   state === "active"
                     ? "border-ink bg-highlight text-[#1d1b19]"
                     : state === "done"
-                      ? "border-line bg-surface text-foreground"
+                      ? "border-ink bg-surface text-foreground"
                       : state === "failed"
                         ? "border-danger bg-danger-soft text-danger"
                         : "border-dashed border-border-strong text-subtle"
@@ -90,7 +90,7 @@ export default function LivePipeline({ turn }: { turn: Turn }) {
                   className={`mx-1 w-4 border-t-2 transition-colors duration-300 ${
                     stateOf(STAGES[i + 1].id) === "pending"
                       ? "border-dashed border-border-strong"
-                      : "border-line"
+                      : "border-ink"
                   }`}
                 />
               )}
