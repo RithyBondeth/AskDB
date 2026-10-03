@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Literal
 
 import anthropic
 from sqlalchemy import Engine
@@ -11,7 +12,10 @@ from askdb.config import Settings, get_settings
 from askdb.db import make_engine
 from askdb.execute import Answer, answer
 from askdb.generate import ClaudeGenerator, SQLGenerator, build_system_prompt
+from askdb.local import LocalGenerator
 from askdb.schema import Schema, introspect, link_tables
+
+Provider = Literal["claude", "local"]
 
 
 @dataclass
@@ -37,8 +41,23 @@ class AskDB:
             )
         return self._client
 
-    def generator_for(self, question: str) -> SQLGenerator:
+    def model_name(self, provider: Provider | None = None) -> str:
+        provider = provider or self.settings.provider
+        return self.settings.local_model if provider == "local" else self.settings.model
+
+    def generator_for(self, question: str, provider: Provider | None = None) -> SQLGenerator:
+        provider = provider or self.settings.provider
         tables = link_tables(self.schema, question)
+        if provider == "local":
+            return LocalGenerator(
+                dialect=self.schema.dialect,
+                schema_ddl=self.schema.ddl(tables),
+                model=self.settings.local_model,
+                base_url=self.settings.local_base_url,
+                api=self.settings.local_api,
+                reference_date=self.settings.reference_date,
+                timeout_s=self.settings.local_timeout_s,
+            )
         system = build_system_prompt(
             dialect=self.schema.dialect,
             schema_ddl=self.schema.ddl(tables),
@@ -49,10 +68,15 @@ class AskDB:
             system, model=self.settings.model, effort=self.settings.effort, client=self.client
         )
 
-    def ask(self, question: str, generator: SQLGenerator | None = None) -> Answer:
+    def ask(
+        self,
+        question: str,
+        generator: SQLGenerator | None = None,
+        provider: Provider | None = None,
+    ) -> Answer:
         return answer(
             question,
-            generator or self.generator_for(question),
+            generator or self.generator_for(question, provider),
             self.engine,
             self.schema.dialect,
             max_retries=self.settings.max_retries,

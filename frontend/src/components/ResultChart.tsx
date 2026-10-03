@@ -66,9 +66,9 @@ export default function ResultChart({
                 dataKey={chart.x}
                 {...axisProps}
                 interval={0}
-                angle={data.length > 8 ? -35 : 0}
-                textAnchor={data.length > 8 ? "end" : "middle"}
-                height={data.length > 8 ? 70 : 30}
+                angle={data.length > 5 ? -35 : 0}
+                textAnchor={data.length > 5 ? "end" : "middle"}
+                height={data.length > 5 ? 70 : 30}
               />
               <YAxis {...axisProps} width={56} />
               <Tooltip contentStyle={tooltipStyle} cursor={{ fill: "var(--accent-soft)" }} />

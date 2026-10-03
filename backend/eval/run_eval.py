@@ -1,10 +1,12 @@
 """Execution-accuracy harness: does the predicted query return the same rows as the gold query?
 
-    uv run python eval/run_eval.py               # full dataset
-    uv run python eval/run_eval.py --limit 5     # quick smoke run
-    uv run python eval/run_eval.py --out eval/results/v1.json
+    uv run python eval/run_eval.py                       # full dataset, default provider
+    uv run python eval/run_eval.py --limit 5             # quick smoke run
+    uv run python eval/run_eval.py --provider local      # open model via Ollama
+    uv run python eval/run_eval.py --out eval/results/claude-v1.json
 
-Each run calls the model once per question (plus repairs), so it costs money.
+With Claude, each question costs an API call (plus repairs). With the local open
+model it is free but slower, depending on your hardware.
 """
 
 from __future__ import annotations
@@ -76,11 +78,16 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--out", type=Path, default=None, help="write per-question results JSON")
+    parser.add_argument(
+        "--provider", choices=["claude", "local"], default=None, help="override ASKDB_PROVIDER"
+    )
     args = parser.parse_args()
 
     rows = [json.loads(line) for line in DATASET.read_text().splitlines() if line.strip()]
     rows = rows[: args.limit] if args.limit else rows
     db = AskDB.from_settings()
+    provider = args.provider or db.settings.provider
+    print(f"Provider: {provider} ({db.model_name(provider)})\n")
 
     results, hits, self_corrected = [], 0, 0
     for row in rows:
@@ -88,7 +95,7 @@ def main() -> int:
         gold = run_query(db.engine, row["gold_sql"], COMPARE_LIMIT).rows
         record: dict[str, Any] = {"id": row["id"], "question": row["question"]}
         try:
-            ans = db.ask(row["question"])
+            ans = db.ask(row["question"], provider=provider)
             pred = run_query(db.engine, ans.sql, COMPARE_LIMIT).rows
             ok = results_match(pred, gold, ordered=row.get("ordered", False))
             record.update(sql=ans.sql, attempts=len(ans.attempts), match=ok)
@@ -109,9 +116,14 @@ def main() -> int:
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         summary = {
-            "model": db.settings.model,
-            "effort": db.settings.effort,
+            "provider": provider,
+            "model": db.model_name(provider),
+            "effort": db.settings.effort if provider == "claude" else None,
             "accuracy": accuracy,
+            "hits": hits,
+            "total": total,
+            "self_corrected": self_corrected,
+            "median_seconds": sorted(r["seconds"] for r in results)[total // 2] if total else 0,
             "results": results,
         }
         args.out.write_text(json.dumps(summary, indent=2, default=str))

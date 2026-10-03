@@ -15,8 +15,12 @@ export interface ChartSpec {
   reason: string;
 }
 
+export type Provider = "claude" | "local";
+
 export interface AskResponse {
   question: string;
+  provider: Provider;
+  model: string;
   sql: string;
   explanation: string;
   columns: string[];
@@ -39,4 +43,12 @@ export interface SchemaTable {
 export interface SchemaResponse {
   dialect: string;
   tables: SchemaTable[];
+}
+
+export interface HealthResponse {
+  status: string;
+  dialect: string;
+  tables: number;
+  default_provider: Provider;
+  providers: Record<Provider, string>;
 }

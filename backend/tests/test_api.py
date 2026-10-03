@@ -5,9 +5,15 @@ from askdb.config import Settings
 from askdb.pipeline import AskDB
 
 
-def make_client(db_path, generator):
+def make_client(db_path, generator, seen_providers=None):
     db = AskDB.from_settings(Settings(database_url=f"sqlite:///{db_path}"))
-    db.generator_for = lambda question: generator  # no network in tests
+
+    def fake_generator_for(question, provider=None):  # no network in tests
+        if seen_providers is not None:
+            seen_providers.append(provider)
+        return generator
+
+    db.generator_for = fake_generator_for
     app.dependency_overrides[get_askdb] = lambda: db
     return TestClient(app)
 
@@ -26,6 +32,28 @@ def test_ask_returns_rows_chart_and_attempts(db_path, scripted):
     assert body["rows"][0] == ["US", 30.0]
     assert body["chart"]["type"] == "bar"
     assert [a["stage"] for a in body["attempts"]] == ["execute", None]
+    assert body["provider"] == "claude" and body["model"] == "claude-opus-5-5"
+
+
+def test_ask_can_choose_the_open_model(db_path, scripted):
+    seen: list = []
+    client = make_client(db_path, scripted("SELECT 1 AS one"), seen)
+    res = client.post("/api/ask", json={"question": "one", "provider": "local"})
+    assert res.status_code == 200
+    assert seen == ["local"]
+    assert res.json()["provider"] == "local"
+    assert "Arctic-Text2SQL-R1-7B" in res.json()["model"]
+
+
+def test_unknown_provider_is_rejected(db_path, scripted):
+    client = make_client(db_path, scripted("SELECT 1"))
+    res = client.post("/api/ask", json={"question": "one", "provider": "gpt"})
+    assert res.status_code == 422
+
+
+def test_health_lists_providers(db_path, scripted):
+    body = make_client(db_path, scripted()).get("/api/health").json()
+    assert set(body["providers"]) == {"claude", "local"}
 
 
 def test_ask_reports_failed_attempts(db_path, scripted):

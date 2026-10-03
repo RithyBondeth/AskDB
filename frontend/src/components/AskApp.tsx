@@ -1,13 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import AttemptsView from "@/components/AttemptsView";
 import ResultChart from "@/components/ResultChart";
 import ResultTable from "@/components/ResultTable";
 import SchemaPanel from "@/components/SchemaPanel";
 import SqlCard from "@/components/SqlCard";
-import type { AskError, AskResponse } from "@/lib/types";
+import type { AskError, AskResponse, HealthResponse, Provider } from "@/lib/types";
 
 const EXAMPLES = [
   "Which artist has the most albums?",
@@ -26,6 +26,18 @@ type State =
 export default function AskApp() {
   const [question, setQuestion] = useState("");
   const [state, setState] = useState<State>({ status: "idle" });
+  const [provider, setProvider] = useState<Provider>("claude");
+  const [models, setModels] = useState<Record<Provider, string> | null>(null);
+
+  useEffect(() => {
+    fetch("/api/health")
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((h: HealthResponse) => {
+        setModels(h.providers);
+        setProvider(h.default_provider);
+      })
+      .catch(() => {});
+  }, []);
 
   async function ask(q: string) {
     const trimmed = q.trim();
@@ -36,7 +48,7 @@ export default function AskApp() {
       const res = await fetch("/api/ask", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ question: trimmed }),
+        body: JSON.stringify({ question: trimmed, provider }),
       });
       const body = await res.json();
       if (res.ok) {
@@ -93,6 +105,12 @@ export default function AskApp() {
               {state.status === "loading" ? "Thinking…" : "Ask"}
             </button>
           </div>
+          <ProviderToggle
+            value={provider}
+            onChange={setProvider}
+            models={models}
+            disabled={state.status === "loading"}
+          />
           <div className="flex flex-wrap gap-2">
             {EXAMPLES.map((ex) => (
               <button
@@ -110,7 +128,10 @@ export default function AskApp() {
 
         {state.status === "loading" && (
           <div className="animate-pulse rounded-lg border border-border bg-surface p-6 text-sm text-muted">
-            Reading the schema and writing SQL for “{state.question}”…
+            {provider === "local"
+              ? "The open model is reasoning about the schema (this can take a while on a laptop)…"
+              : "Reading the schema and writing SQL…"}{" "}
+            <span className="text-foreground">“{state.question}”</span>
           </div>
         )}
 
@@ -136,6 +157,12 @@ function Result({ data }: { data: AskResponse }) {
   const corrected = data.attempts.length > 1;
   return (
     <section className="flex flex-col gap-4">
+      <p className="text-xs text-muted">
+        Answered by{" "}
+        <span className="rounded bg-accent-soft px-1.5 py-0.5 font-mono text-foreground">
+          {data.model}
+        </span>
+      </p>
       {corrected ? <AttemptsView attempts={data.attempts} /> : <SqlCard sql={data.sql} />}
       {data.explanation && <p className="text-sm text-muted">{data.explanation}</p>}
       {data.chart.type !== "none" && (
@@ -143,5 +170,49 @@ function Result({ data }: { data: AskResponse }) {
       )}
       <ResultTable columns={data.columns} rows={data.rows} truncated={data.truncated} />
     </section>
+  );
+}
+
+const PROVIDER_LABELS: Record<Provider, string> = {
+  claude: "Claude",
+  local: "Open model",
+};
+
+function ProviderToggle({
+  value,
+  onChange,
+  models,
+  disabled,
+}: {
+  value: Provider;
+  onChange: (p: Provider) => void;
+  models: Record<Provider, string> | null;
+  disabled: boolean;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-3 text-sm">
+      <div
+        role="radiogroup"
+        aria-label="Model"
+        className="inline-flex rounded-lg border border-border bg-surface p-0.5"
+      >
+        {(Object.keys(PROVIDER_LABELS) as Provider[]).map((p) => (
+          <button
+            key={p}
+            type="button"
+            role="radio"
+            aria-checked={value === p}
+            disabled={disabled}
+            onClick={() => onChange(p)}
+            className={`rounded-md px-3 py-1 disabled:opacity-50 ${
+              value === p ? "bg-accent text-on-accent" : "text-muted hover:text-foreground"
+            }`}
+          >
+            {PROVIDER_LABELS[p]}
+          </button>
+        ))}
+      </div>
+      {models && <span className="truncate font-mono text-xs text-muted">{models[value]}</span>}
+    </div>
   );
 }

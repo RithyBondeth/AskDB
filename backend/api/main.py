@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from askdb.config import get_settings
 from askdb.execute import AnswerError, Attempt
 from askdb.generate import CannotAnswerError, GenerationError
-from askdb.pipeline import AskDB
+from askdb.pipeline import AskDB, Provider
 from askdb.present import ChartSpec, pick_chart, to_json_value
 
 app = FastAPI(title="AskDB API", version="0.1.0")
@@ -35,6 +35,8 @@ DB = Annotated[AskDB, Depends(get_askdb)]
 
 class AskRequest(BaseModel):
     question: str = Field(min_length=1, max_length=1000)
+    # None uses the server default (ASKDB_PROVIDER).
+    provider: Provider | None = None
 
 
 class AttemptOut(BaseModel):
@@ -52,6 +54,8 @@ class ChartOut(BaseModel):
 
 class AskResponse(BaseModel):
     question: str
+    provider: Provider
+    model: str
     sql: str
     explanation: str
     columns: list[str]
@@ -72,7 +76,13 @@ def _attempts(attempts: list[Attempt]) -> list[AttemptOut]:
 
 @app.get("/api/health")
 def health(db: DB) -> dict:
-    return {"status": "ok", "dialect": db.schema.dialect, "tables": len(db.schema.tables)}
+    return {
+        "status": "ok",
+        "dialect": db.schema.dialect,
+        "tables": len(db.schema.tables),
+        "default_provider": db.settings.provider,
+        "providers": {"claude": db.model_name("claude"), "local": db.model_name("local")},
+    }
 
 
 @app.get("/api/schema")
@@ -84,8 +94,9 @@ def schema(db: DB) -> dict:
 def ask(req: AskRequest, db: DB) -> AskResponse:
     # Sync endpoint: FastAPI runs it in a worker thread, so the blocking SDK
     # and DB calls don't stall the event loop.
+    provider = req.provider or db.settings.provider
     try:
-        ans = db.ask(req.question.strip())
+        ans = db.ask(req.question.strip(), provider=provider)
     except AnswerError as e:
         raise HTTPException(
             422, ErrorDetail(message=str(e), attempts=_attempts(e.attempts)).model_dump()
@@ -113,6 +124,8 @@ def ask(req: AskRequest, db: DB) -> AskResponse:
     chart: ChartSpec = pick_chart(ans.result.columns, rows)
     return AskResponse(
         question=ans.question,
+        provider=provider,
+        model=db.model_name(provider),
         sql=ans.sql,
         explanation=ans.explanation,
         columns=ans.result.columns,

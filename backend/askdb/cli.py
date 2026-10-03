@@ -14,6 +14,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Ask your database a question in plain English.")
     parser.add_argument("question", nargs="+", help="the question to ask")
     parser.add_argument("--show-schema", action="store_true", help="print the schema DDL first")
+    parser.add_argument(
+        "--provider", choices=["claude", "local"], default=None, help="override ASKDB_PROVIDER"
+    )
     args = parser.parse_args(argv)
 
     db = AskDB.from_settings()
@@ -22,7 +25,7 @@ def main(argv: list[str] | None = None) -> int:
 
     question = " ".join(args.question)
     try:
-        ans = db.ask(question)
+        ans = db.ask(question, provider=args.provider)
     except AnswerError as e:
         for i, a in enumerate(e.attempts, 1):
             print(f"-- attempt {i} failed ({a.stage}): {a.error}\n{a.sql}\n", file=sys.stderr)
