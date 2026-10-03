@@ -13,9 +13,11 @@ import {
   YAxis,
 } from "recharts";
 
+import { formatAxis, formatCell } from "@/lib/format";
 import type { Cell, ChartSpec } from "@/lib/types";
 
-const SERIES_COLORS = ["var(--accent)", "#d97706", "#0d9488"];
+// Validated categorical slots in fixed order (never cycled; the backend caps at 3 series).
+const SERIES = ["var(--series-1)", "var(--series-2)", "var(--series-3)"];
 
 export default function ResultChart({
   columns,
@@ -29,63 +31,90 @@ export default function ResultChart({
   if (chart.type === "none" || !chart.x || !chart.y?.length) return null;
 
   const data = rows.map((r) => Object.fromEntries(columns.map((c, i) => [c, r[i]])));
-  const series = chart.y;
-  const axisProps = { stroke: "var(--muted)", fontSize: 12, tickLine: false };
-  const tooltipStyle = {
-    background: "var(--surface)",
-    border: "1px solid var(--border)",
-    borderRadius: 8,
-    color: "var(--foreground)",
+  const series = chart.y.slice(0, SERIES.length);
+  const labels = data.map((d) => String(d[chart.x!] ?? ""));
+  const longest = Math.max(...labels.map((l) => l.length));
+  // Rotate when labels would collide; truncate very long ones (full text is in the tooltip).
+  const rotate = data.length > 5 || longest * data.length > 40;
+  const tickLabel = (v: unknown) => {
+    const s = String(v ?? "");
+    return s.length > 14 ? `${s.slice(0, 13)}…` : s;
   };
+  const axis = {
+    stroke: "var(--border-strong)",
+    tick: { fill: "var(--muted)", fontSize: 12 },
+    tickLine: false,
+  };
+  const tooltip = {
+    contentStyle: {
+      background: "var(--surface)",
+      border: "1px solid var(--border)",
+      borderRadius: 10,
+      boxShadow: "0 8px 24px -12px rgb(0 0 0 / 0.25)",
+      color: "var(--foreground)",
+      fontSize: 13,
+    },
+    labelStyle: { color: "var(--foreground)", fontWeight: 600, marginBottom: 4 },
+    itemStyle: { color: "var(--muted)" },
+    formatter: (v: unknown) => formatCell(v as Cell),
+  };
+  const xAxis = (
+    <XAxis
+      dataKey={chart.x}
+      {...axis}
+      interval={0}
+      tickFormatter={tickLabel}
+      angle={rotate ? -35 : 0}
+      textAnchor={rotate ? "end" : "middle"}
+      height={rotate ? 72 : 32}
+    />
+  );
+  const yAxis = (
+    <YAxis {...axis} axisLine={false} width={52} tickFormatter={(v: number) => formatAxis(v)} />
+  );
 
   return (
-    <figure className="rounded-lg border border-border bg-surface p-4">
-      <div className="h-72 w-full">
-        <ResponsiveContainer width="100%" height="100%">
-          {chart.type === "line" ? (
-            <LineChart data={data} margin={{ top: 8, right: 16, bottom: 8, left: 8 }}>
-              <CartesianGrid stroke="var(--border)" vertical={false} />
-              <XAxis dataKey={chart.x} {...axisProps} />
-              <YAxis {...axisProps} width={56} />
-              <Tooltip contentStyle={tooltipStyle} />
-              {series.length > 1 && <Legend />}
-              {series.map((s, i) => (
-                <Line
-                  key={s}
-                  dataKey={s}
-                  stroke={SERIES_COLORS[i % SERIES_COLORS.length]}
-                  strokeWidth={2}
-                  dot={data.length <= 24}
-                />
-              ))}
-            </LineChart>
-          ) : (
-            <BarChart data={data} margin={{ top: 8, right: 16, bottom: 8, left: 8 }}>
-              <CartesianGrid stroke="var(--border)" vertical={false} />
-              <XAxis
-                dataKey={chart.x}
-                {...axisProps}
-                interval={0}
-                angle={data.length > 5 ? -35 : 0}
-                textAnchor={data.length > 5 ? "end" : "middle"}
-                height={data.length > 5 ? 70 : 30}
+    <div className="h-80 w-full">
+      <ResponsiveContainer width="100%" height="100%">
+        {chart.type === "line" ? (
+          <LineChart data={data} margin={{ top: 12, right: 16, bottom: 4, left: 0 }}>
+            <CartesianGrid stroke="var(--border)" vertical={false} />
+            {xAxis}
+            {yAxis}
+            <Tooltip {...tooltip} cursor={{ stroke: "var(--border-strong)" }} />
+            {series.length > 1 && <Legend iconType="circle" wrapperStyle={{ fontSize: 12 }} />}
+            {series.map((s, i) => (
+              <Line
+                key={s}
+                dataKey={s}
+                stroke={SERIES[i]}
+                strokeWidth={2}
+                dot={data.length <= 24 ? { r: 4, strokeWidth: 2, fill: "var(--surface)" } : false}
+                activeDot={{ r: 5, strokeWidth: 2, stroke: "var(--surface)" }}
+                animationDuration={500}
               />
-              <YAxis {...axisProps} width={56} />
-              <Tooltip contentStyle={tooltipStyle} cursor={{ fill: "var(--accent-soft)" }} />
-              {series.length > 1 && <Legend />}
-              {series.map((s, i) => (
-                <Bar
-                  key={s}
-                  dataKey={s}
-                  fill={SERIES_COLORS[i % SERIES_COLORS.length]}
-                  radius={[4, 4, 0, 0]}
-                />
-              ))}
-            </BarChart>
-          )}
-        </ResponsiveContainer>
-      </div>
-      <figcaption className="mt-2 text-xs text-muted">{chart.reason}</figcaption>
-    </figure>
+            ))}
+          </LineChart>
+        ) : (
+          <BarChart data={data} margin={{ top: 12, right: 16, bottom: 4, left: 0 }} barGap={2}>
+            <CartesianGrid stroke="var(--border)" vertical={false} />
+            {xAxis}
+            {yAxis}
+            <Tooltip {...tooltip} cursor={{ fill: "var(--surface-2)" }} />
+            {series.length > 1 && <Legend iconType="circle" wrapperStyle={{ fontSize: 12 }} />}
+            {series.map((s, i) => (
+              <Bar
+                key={s}
+                dataKey={s}
+                fill={SERIES[i]}
+                radius={[4, 4, 0, 0]}
+                maxBarSize={56}
+                animationDuration={500}
+              />
+            ))}
+          </BarChart>
+        )}
+      </ResponsiveContainer>
+    </div>
   );
 }

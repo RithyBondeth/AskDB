@@ -2,48 +2,73 @@
 
 import { useEffect, useState } from "react";
 
-import AttemptsView from "@/components/AttemptsView";
-import ResultChart from "@/components/ResultChart";
-import ResultTable from "@/components/ResultTable";
-import SchemaPanel from "@/components/SchemaPanel";
-import SqlCard from "@/components/SqlCard";
+import Composer from "@/components/Composer";
+import Examples from "@/components/Examples";
+import Header from "@/components/Header";
+import ResultView from "@/components/ResultView";
+import Sidebar from "@/components/Sidebar";
+import { ErrorView, LoadingView } from "@/components/StatusViews";
 import type { AskError, AskResponse, HealthResponse, Provider } from "@/lib/types";
-
-const EXAMPLES = [
-  "Which artist has the most albums?",
-  "Total revenue by country, top 10",
-  "Revenue per month in 2013",
-  "Who are the top 5 customers by total spend?",
-  "What was our revenue last quarter?",
-];
 
 type State =
   | { status: "idle" }
   | { status: "loading"; question: string }
-  | { status: "done"; data: AskResponse }
+  | { status: "done"; data: AskResponse; seconds: number }
   | { status: "error"; question: string; error: AskError };
+
+const HISTORY_KEY = "askdb-history";
+const HISTORY_MAX = 8;
+
+function loadHistory(): string[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(HISTORY_KEY) ?? "[]");
+    return Array.isArray(raw) ? raw.filter((q) => typeof q === "string").slice(0, HISTORY_MAX) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveHistory(items: string[]) {
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(items));
+  } catch {
+    // storage unavailable: history just won't persist
+  }
+}
 
 export default function AskApp() {
   const [question, setQuestion] = useState("");
   const [state, setState] = useState<State>({ status: "idle" });
   const [provider, setProvider] = useState<Provider>("claude");
-  const [models, setModels] = useState<Record<Provider, string> | null>(null);
+  const [health, setHealth] = useState<HealthResponse | null>(null);
+  const [offline, setOffline] = useState(false);
+  const [history, setHistory] = useState<string[]>([]);
 
   useEffect(() => {
+    // localStorage is only available after mount.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setHistory(loadHistory());
     fetch("/api/health")
       .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then((h: HealthResponse) => {
-        setModels(h.providers);
+        setHealth(h);
         setProvider(h.default_provider);
       })
-      .catch(() => {});
+      .catch(() => setOffline(true));
   }, []);
+
+  const busy = state.status === "loading";
 
   async function ask(q: string) {
     const trimmed = q.trim();
-    if (!trimmed || state.status === "loading") return;
+    if (!trimmed || busy) return;
     setQuestion(trimmed);
     setState({ status: "loading", question: trimmed });
+    const next = [trimmed, ...history.filter((h) => h !== trimmed)].slice(0, HISTORY_MAX);
+    setHistory(next);
+    saveHistory(next);
+
+    const started = performance.now();
     try {
       const res = await fetch("/api/ask", {
         method: "POST",
@@ -52,7 +77,11 @@ export default function AskApp() {
       });
       const body = await res.json();
       if (res.ok) {
-        setState({ status: "done", data: body as AskResponse });
+        setState({
+          status: "done",
+          data: body as AskResponse,
+          seconds: (performance.now() - started) / 1000,
+        });
       } else {
         const detail = body?.detail;
         const error: AskError =
@@ -71,148 +100,72 @@ export default function AskApp() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-4 py-8 lg:flex-row">
-      <main className="flex min-w-0 flex-1 flex-col gap-6">
-        <header>
-          <h1 className="text-2xl font-semibold tracking-tight">AskDB</h1>
-          <p className="mt-1 text-sm text-muted">
-            Ask a question in plain English. AskDB writes the SQL, checks it is read-only, runs it,
-            and fixes its own mistakes.
-          </p>
-        </header>
+    <div className="page-backdrop flex min-h-screen flex-col">
+      <Header health={health} offline={offline} />
 
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            ask(question);
-          }}
-          className="flex flex-col gap-3"
-        >
-          <div className="flex gap-2">
-            <input
-              value={question}
-              onChange={(e) => setQuestion(e.target.value)}
-              placeholder="e.g. Which genres sell the most tracks?"
-              maxLength={1000}
-              aria-label="Question"
-              className="min-w-0 flex-1 rounded-lg border border-border bg-surface px-4 py-3 text-base outline-none focus:border-accent focus:ring-2 focus:ring-accent/30"
-            />
-            <button
-              type="submit"
-              disabled={state.status === "loading" || !question.trim()}
-              className="rounded-lg bg-accent px-5 py-3 font-medium text-on-accent disabled:opacity-50"
-            >
-              {state.status === "loading" ? "Thinking…" : "Ask"}
-            </button>
-          </div>
-          <ProviderToggle
-            value={provider}
-            onChange={setProvider}
-            models={models}
-            disabled={state.status === "loading"}
-          />
-          <div className="flex flex-wrap gap-2">
-            {EXAMPLES.map((ex) => (
-              <button
-                key={ex}
-                type="button"
-                onClick={() => ask(ex)}
-                disabled={state.status === "loading"}
-                className="rounded-full border border-border bg-surface px-3 py-1 text-sm text-muted hover:border-accent hover:text-foreground disabled:opacity-50"
-              >
-                {ex}
-              </button>
-            ))}
-          </div>
-        </form>
-
-        {state.status === "loading" && (
-          <div className="animate-pulse rounded-lg border border-border bg-surface p-6 text-sm text-muted">
-            {provider === "local"
-              ? "The open model is reasoning about the schema (this can take a while on a laptop)…"
-              : "Reading the schema and writing SQL…"}{" "}
-            <span className="text-foreground">“{state.question}”</span>
-          </div>
-        )}
-
-        {state.status === "error" && (
-          <section className="flex flex-col gap-4">
-            <div className="rounded-lg border border-danger/40 bg-danger-soft p-4 text-sm">
-              <p className="font-medium text-danger">Couldn’t answer that</p>
-              <p className="mt-1">{state.error.message}</p>
+      <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 px-4 pt-8 pb-16 lg:flex-row lg:gap-8">
+        <main className="flex min-w-0 flex-1 flex-col gap-6">
+          {state.status === "idle" ? (
+            <div className="animate-fade-up text-center sm:text-left">
+              <span className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1 text-xs text-muted">
+                <span className="size-1.5 rounded-full bg-accent" />
+                Validated, read-only, self-correcting SQL
+              </span>
+              <h1 className="text-gradient mt-4 text-4xl font-semibold tracking-tight sm:text-5xl">
+                Ask your data anything.
+              </h1>
+              <p className="mt-3 max-w-2xl text-base text-muted">
+                Type a question in plain English. AskDB writes the SQL, checks it can’t change
+                anything, runs it, and fixes its own mistakes.
+              </p>
             </div>
-            {state.error.attempts.length > 0 && <AttemptsView attempts={state.error.attempts} />}
-          </section>
-        )}
+          ) : (
+            <h1 className="text-gradient text-2xl font-semibold tracking-tight">
+              Ask your data anything.
+            </h1>
+          )}
 
-        {state.status === "done" && <Result data={state.data} />}
-      </main>
+          <Composer
+            value={question}
+            onChange={setQuestion}
+            onSubmit={() => ask(question)}
+            provider={provider}
+            onProviderChange={setProvider}
+            models={health?.providers ?? null}
+            busy={busy}
+          />
 
-      <SchemaPanel />
-    </div>
-  );
-}
+          {state.status === "idle" && (
+            <div className="flex flex-col gap-3">
+              <p className="text-xs font-medium tracking-wide text-subtle uppercase">
+                Try one of these
+              </p>
+              <Examples onPick={ask} disabled={busy} />
+            </div>
+          )}
+          {state.status === "loading" && (
+            <LoadingView key={state.question} question={state.question} provider={provider} />
+          )}
+          {state.status === "error" && <ErrorView question={state.question} error={state.error} />}
+          {state.status === "done" && (
+            <ResultView
+              key={state.data.sql + state.seconds}
+              data={state.data}
+              seconds={state.seconds}
+            />
+          )}
+        </main>
 
-function Result({ data }: { data: AskResponse }) {
-  const corrected = data.attempts.length > 1;
-  return (
-    <section className="flex flex-col gap-4">
-      <p className="text-xs text-muted">
-        Answered by{" "}
-        <span className="rounded bg-accent-soft px-1.5 py-0.5 font-mono text-foreground">
-          {data.model}
-        </span>
-      </p>
-      {corrected ? <AttemptsView attempts={data.attempts} /> : <SqlCard sql={data.sql} />}
-      {data.explanation && <p className="text-sm text-muted">{data.explanation}</p>}
-      {data.chart.type !== "none" && (
-        <ResultChart columns={data.columns} rows={data.rows} chart={data.chart} />
-      )}
-      <ResultTable columns={data.columns} rows={data.rows} truncated={data.truncated} />
-    </section>
-  );
-}
-
-const PROVIDER_LABELS: Record<Provider, string> = {
-  claude: "Claude",
-  local: "Open model",
-};
-
-function ProviderToggle({
-  value,
-  onChange,
-  models,
-  disabled,
-}: {
-  value: Provider;
-  onChange: (p: Provider) => void;
-  models: Record<Provider, string> | null;
-  disabled: boolean;
-}) {
-  return (
-    <div className="flex flex-wrap items-center gap-3 text-sm">
-      <div
-        role="radiogroup"
-        aria-label="Model"
-        className="inline-flex rounded-lg border border-border bg-surface p-0.5"
-      >
-        {(Object.keys(PROVIDER_LABELS) as Provider[]).map((p) => (
-          <button
-            key={p}
-            type="button"
-            role="radio"
-            aria-checked={value === p}
-            disabled={disabled}
-            onClick={() => onChange(p)}
-            className={`rounded-md px-3 py-1 disabled:opacity-50 ${
-              value === p ? "bg-accent text-on-accent" : "text-muted hover:text-foreground"
-            }`}
-          >
-            {PROVIDER_LABELS[p]}
-          </button>
-        ))}
+        <Sidebar
+          history={history}
+          onPick={ask}
+          onClearHistory={() => {
+            setHistory([]);
+            saveHistory([]);
+          }}
+          disabled={busy}
+        />
       </div>
-      {models && <span className="truncate font-mono text-xs text-muted">{models[value]}</span>}
     </div>
   );
 }

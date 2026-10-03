@@ -53,7 +53,13 @@ class Schema:
         return {
             "dialect": self.dialect,
             "tables": [
-                {"name": t.name, "columns": [{"name": c.name, "type": c.type} for c in t.columns]}
+                {
+                    "name": t.name,
+                    "columns": [
+                        {"name": c.name, "type": c.type, "primary_key": c.primary_key}
+                        for c in t.columns
+                    ],
+                }
                 for t in self.tables
             ],
         }

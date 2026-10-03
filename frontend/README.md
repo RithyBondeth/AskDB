@@ -14,9 +14,21 @@ CORS setup is needed.
 
 | Path | Purpose |
 | --- | --- |
-| `src/components/AskApp.tsx` | Question box, example prompts, result layout |
-| `src/components/AttemptsView.tsx` | Failed attempts and the errors fed back to the model |
-| `src/components/ResultChart.tsx` | Bar/line chart picked by the backend |
+| `src/components/AskApp.tsx` | Page layout, state, history, and calls to the API |
+| `src/components/Header.tsx` | Top bar: backend status, source link, theme toggle |
+| `src/components/Composer.tsx` | Question box and Claude / open-model switch |
+| `src/components/Examples.tsx` | Example question cards |
+| `src/components/ResultView.tsx` | Answer summary, chart/table tabs, single-value card, CSV export |
+| `src/components/PipelineSteps.tsx` | What each pipeline stage did for this answer |
+| `src/components/AttemptsView.tsx` | Self-correction timeline: failed queries and their errors |
+| `src/components/SqlCard.tsx` | Highlighted SQL with copy button |
+| `src/components/ResultChart.tsx` | Bar/line chart (Recharts) picked by the backend |
 | `src/components/ResultTable.tsx` | Result rows |
-| `src/components/SchemaPanel.tsx` | Browsable schema sidebar |
+| `src/components/Sidebar.tsx` | Recent questions and a searchable schema browser |
+| `src/components/StatusViews.tsx` | Loading and error states |
+| `src/lib/` | API types, number formatting, CSV, SQL highlighting, backend proxy |
 | `src/app/api/*/route.ts` | Proxy to the Python API |
+
+Light, dark, and system themes are supported (toggle in the header). Chart
+colors come from a colorblind-validated categorical palette, defined as CSS
+variables in `src/app/globals.css`.

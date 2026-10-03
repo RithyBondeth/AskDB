@@ -1,67 +1,50 @@
+import { formatCell, isNumericColumn } from "@/lib/format";
 import type { Cell } from "@/lib/types";
 
-function format(v: Cell): string {
-  if (v === null) return "NULL";
-  if (typeof v === "number" && !Number.isInteger(v))
-    return v.toLocaleString(undefined, { maximumFractionDigits: 2 });
-  return String(v);
-}
-
-export default function ResultTable({
-  columns,
-  rows,
-  truncated,
-}: {
-  columns: string[];
-  rows: Cell[][];
-  truncated: boolean;
-}) {
+export default function ResultTable({ columns, rows }: { columns: string[]; rows: Cell[][] }) {
   if (rows.length === 0) {
     return (
-      <div className="rounded-lg border border-border bg-surface p-4 text-sm text-muted">
+      <p className="px-4 py-10 text-center text-sm text-muted">
         The query ran but returned no rows.
-      </div>
+      </p>
     );
   }
-  const numeric = columns.map((_, j) =>
-    rows.every((r) => r[j] === null || typeof r[j] === "number"),
-  );
+  const numeric = columns.map((_, j) => isNumericColumn(rows, j));
   return (
-    <div className="overflow-hidden rounded-lg border border-border bg-surface">
-      <div className="max-h-[28rem] overflow-auto">
-        <table className="w-full text-left text-sm">
-          <thead className="sticky top-0 bg-surface">
-            <tr className="border-b border-border">
-              {columns.map((c, j) => (
-                <th
-                  key={c}
-                  className={`whitespace-nowrap px-4 py-2 font-medium ${numeric[j] ? "text-right" : ""}`}
+    <div className="max-h-[28rem] overflow-auto">
+      <table className="w-full text-left text-sm">
+        <thead className="sticky top-0 z-10 bg-surface">
+          <tr className="border-b border-border">
+            <th className="w-10 px-3 py-2.5 text-right text-xs font-medium text-subtle">#</th>
+            {columns.map((c, j) => (
+              <th
+                key={c}
+                className={`whitespace-nowrap px-4 py-2.5 text-xs font-medium tracking-wide text-muted uppercase ${numeric[j] ? "text-right" : ""}`}
+              >
+                {c}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr
+              key={i}
+              className="border-b border-border/70 transition-colors last:border-0 hover:bg-surface-2"
+            >
+              <td className="px-3 py-2.5 text-right text-xs text-subtle tabular-nums">{i + 1}</td>
+              {r.map((v, j) => (
+                <td
+                  key={j}
+                  className={`whitespace-nowrap px-4 py-2.5 ${numeric[j] ? "text-right tabular-nums" : ""} ${v === null ? "text-subtle italic" : ""}`}
                 >
-                  {c}
-                </th>
+                  {formatCell(v)}
+                </td>
               ))}
             </tr>
-          </thead>
-          <tbody>
-            {rows.map((r, i) => (
-              <tr key={i} className="border-b border-border last:border-0">
-                {r.map((v, j) => (
-                  <td
-                    key={j}
-                    className={`whitespace-nowrap px-4 py-2 ${typeof v === "number" ? "text-right tabular-nums" : ""} ${v === null ? "text-muted" : ""}`}
-                  >
-                    {format(v)}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <div className="border-t border-border px-4 py-2 text-xs text-muted">
-        {rows.length} {rows.length === 1 ? "row" : "rows"}
-        {truncated && ` (first ${rows.length} shown)`}
-      </div>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

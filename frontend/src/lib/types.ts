@@ -37,7 +37,7 @@ export interface AskError {
 
 export interface SchemaTable {
   name: string;
-  columns: { name: string; type: string }[];
+  columns: { name: string; type: string; primary_key?: boolean }[];
 }
 
 export interface SchemaResponse {
