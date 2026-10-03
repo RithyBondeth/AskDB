@@ -161,6 +161,12 @@ body {
   color: var(--foreground);
 }
 
+/* Visible keyboard focus everywhere (mouse clicks don't show it). */
+:where(button, a, input, textarea, select, summary, [tabindex]):focus-visible {
+  outline: 2.5px dashed var(--accent);
+  outline-offset: 3px;
+}
+
 /* Dotted notebook paper */
 .page-backdrop {
   background-color: var(--background);

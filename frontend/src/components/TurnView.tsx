@@ -5,6 +5,7 @@ import {
   Clock,
   CornerDownRight,
   Link2,
+  Pencil,
   RotateCcw,
   Rows3,
   Sparkles,
@@ -28,6 +29,7 @@ export default function TurnView({
   onRunSql,
   onRevert,
   onRetry,
+  onEdit,
   onFollowUp,
   onShare,
 }: {
@@ -38,6 +40,7 @@ export default function TurnView({
   onRunSql: (sql: string) => Promise<string | null>;
   onRevert: () => void;
   onRetry: () => void;
+  onEdit: () => void;
   onFollowUp: (q: string) => void;
   onShare: () => Promise<void>;
 }) {
@@ -153,6 +156,23 @@ export default function TurnView({
                     Oops, couldn’t answer that
                   </p>
                   <p className="mt-1.5 break-words text-foreground/80">{error.message}</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={onRetry}
+                      disabled={busy}
+                      className="btn-ink inline-flex items-center gap-1.5 px-3 py-1 text-sm font-medium"
+                    >
+                      <RotateCcw className="size-3.5" strokeWidth={2.5} /> Try again
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onEdit}
+                      className="btn-paper inline-flex items-center gap-1.5 px-3 py-1 text-sm font-medium"
+                    >
+                      <Pencil className="size-3.5" strokeWidth={2.5} /> Edit question
+                    </button>
+                  </div>
                 </div>
               </div>
               {error.attempts.length > 0 && (

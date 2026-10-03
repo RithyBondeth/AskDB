@@ -9,6 +9,7 @@ import DatabasePicker from "@/components/DatabasePicker";
 import Doodle from "@/components/Doodle";
 import Examples from "@/components/Examples";
 import Header from "@/components/Header";
+import SetupNotice from "@/components/SetupNotice";
 import Sidebar, { SidebarDrawer } from "@/components/Sidebar";
 import TurnView from "@/components/TurnView";
 import UploadDialog from "@/components/UploadDialog";
@@ -415,7 +416,10 @@ export default function AskApp() {
                   className="mx-auto w-full max-w-[19rem] md:max-w-none"
                 />
               </div>
-              <div className="mx-auto w-full max-w-4xl">{composer}</div>
+              <div className="mx-auto flex w-full max-w-4xl flex-col gap-4">
+                <SetupNotice offline={offline} health={health} provider={provider} />
+                {composer}
+              </div>
               <div className="mx-auto flex w-full max-w-4xl flex-col gap-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="font-hand text-2xl leading-none font-bold">
@@ -491,6 +495,10 @@ export default function AskApp() {
                       update(t.id, (cur) => ({ ...cur, data: cur.original, original: undefined }))
                     }
                     onRetry={() => ask(t.question)}
+                    onEdit={() => {
+                      setQuestion(t.question);
+                      requestAnimationFrame(() => inputRef.current?.focus());
+                    }}
                     onFollowUp={ask}
                     onShare={async () => {
                       const db =

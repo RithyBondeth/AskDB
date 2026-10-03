@@ -147,6 +147,14 @@ def test_auto_provider(db_path, monkeypatch):
     assert forced.default_provider == "local"
 
 
+def test_blank_key_counts_as_unset(db_path, monkeypatch):
+    # A copied .env.example has `ASKDB_FREE_API_KEY=` with nothing after it.
+    monkeypatch.setenv("ASKDB_FREE_API_KEY", "")
+    s = Settings(database_url=f"sqlite:///{db_path}", _env_file=None)
+    assert s.free_api_key is None
+    assert not AskDB.from_settings(s).configured["free"]
+
+
 def test_free_generator_gets_the_full_prompt(db_path):
     db = AskDB.from_settings(settings(db_path, free_api_key="k", free_model="some-model"))
     gen = db.generator_for("how many customers", provider="free")

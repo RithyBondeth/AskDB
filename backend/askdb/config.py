@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
@@ -53,6 +53,12 @@ class Settings(BaseSettings):
     upload_dir: Path = BACKEND_DIR / "data" / "uploads"
     max_upload_mb: int = 50
     max_uploads: int = 20
+
+    @field_validator("anthropic_api_key", "free_api_key", mode="before")
+    @classmethod
+    def _blank_is_unset(cls, v: object) -> object:
+        # `.env.example` ships with empty `KEY=` lines; treat those as not set.
+        return None if isinstance(v, str) and not v.strip() else v
 
 
 @lru_cache
