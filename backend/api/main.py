@@ -2,21 +2,29 @@
 
 from __future__ import annotations
 
+import json
+import logging
+import queue
+import threading
+from collections.abc import Iterator
 from functools import lru_cache
-from typing import Annotated
+from typing import Annotated, Literal
 
 import anthropic
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from askdb.config import get_settings
-from askdb.execute import AnswerError, Attempt
-from askdb.generate import CannotAnswerError, GenerationError
+from askdb.execute import Answer, AnswerError, Attempt
+from askdb.generate import CannotAnswerError, GenerationError, Turn
 from askdb.pipeline import AskDB, Provider
-from askdb.present import ChartSpec, pick_chart, to_json_value
+from askdb.present import pick_chart, to_json_value
 
-app = FastAPI(title="AskDB API", version="0.1.0")
+log = logging.getLogger("askdb.api")
+
+app = FastAPI(title="AskDB API", version="0.2.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=get_settings().cors_origins,
@@ -33,10 +41,24 @@ def get_askdb() -> AskDB:
 DB = Annotated[AskDB, Depends(get_askdb)]
 
 
+# ---------------------------------------------------------------- models
+
+
+class TurnIn(BaseModel):
+    question: str = Field(max_length=1000)
+    sql: str = Field(max_length=5000)
+
+
 class AskRequest(BaseModel):
     question: str = Field(min_length=1, max_length=1000)
     # None uses the server default (ASKDB_PROVIDER).
     provider: Provider | None = None
+    # Earlier turns of the conversation, oldest first, for follow-up questions.
+    context: list[TurnIn] = Field(default_factory=list, max_length=5)
+
+
+class RunRequest(BaseModel):
+    sql: str = Field(min_length=1, max_length=5000)
 
 
 class AttemptOut(BaseModel):
@@ -54,7 +76,7 @@ class ChartOut(BaseModel):
 
 class AskResponse(BaseModel):
     question: str
-    provider: Provider
+    provider: Provider | Literal["manual"]
     model: str
     sql: str
     explanation: str
@@ -70,8 +92,55 @@ class ErrorDetail(BaseModel):
     attempts: list[AttemptOut] = []
 
 
+# ---------------------------------------------------------------- helpers
+
+
 def _attempts(attempts: list[Attempt]) -> list[AttemptOut]:
     return [AttemptOut(sql=a.sql, error=a.error, stage=a.stage) for a in attempts]
+
+
+def to_response(ans: Answer, provider: str, model: str) -> AskResponse:
+    rows = [[to_json_value(v) for v in r] for r in ans.result.rows]
+    chart = pick_chart(ans.result.columns, rows)
+    return AskResponse(
+        question=ans.question,
+        provider=provider,
+        model=model,
+        sql=ans.sql,
+        explanation=ans.explanation,
+        columns=ans.result.columns,
+        rows=rows,
+        truncated=ans.result.truncated,
+        chart=ChartOut(**chart.__dict__),
+        attempts=_attempts(ans.attempts),
+    )
+
+
+def error_detail(e: Exception) -> tuple[int, ErrorDetail]:
+    """Map pipeline and model errors to an HTTP status and a message for the UI."""
+    if isinstance(e, AnswerError):
+        return 422, ErrorDetail(message=str(e), attempts=_attempts(e.attempts))
+    if isinstance(e, CannotAnswerError):
+        return 422, ErrorDetail(message=str(e))
+    if isinstance(e, GenerationError):
+        return 502, ErrorDetail(message=str(e))
+    if isinstance(e, anthropic.AuthenticationError):
+        return 500, ErrorDetail(message="Anthropic API key is missing or invalid.")
+    if isinstance(e, anthropic.RateLimitError):
+        return 429, ErrorDetail(message="Rate limited by the model API; try again.")
+    if isinstance(e, anthropic.APIError):
+        return 502, ErrorDetail(message=f"Model API error: {e.message}")
+    if isinstance(e, anthropic.AnthropicError):  # e.g. no credentials configured
+        return 500, ErrorDetail(message=str(e))
+    log.exception("Unexpected error", exc_info=e)
+    return 500, ErrorDetail(message="Unexpected server error. Check the backend logs.")
+
+
+def _context(req: AskRequest) -> list[Turn]:
+    return [Turn(question=t.question, sql=t.sql) for t in req.context]
+
+
+# ---------------------------------------------------------------- routes
 
 
 @app.get("/api/health")
@@ -96,41 +165,55 @@ def ask(req: AskRequest, db: DB) -> AskResponse:
     # and DB calls don't stall the event loop.
     provider = req.provider or db.settings.provider
     try:
-        ans = db.ask(req.question.strip(), provider=provider)
-    except AnswerError as e:
-        raise HTTPException(
-            422, ErrorDetail(message=str(e), attempts=_attempts(e.attempts)).model_dump()
-        ) from e
-    except CannotAnswerError as e:
-        raise HTTPException(422, ErrorDetail(message=str(e)).model_dump()) from e
-    except GenerationError as e:
-        raise HTTPException(502, ErrorDetail(message=str(e)).model_dump()) from e
-    except anthropic.AuthenticationError as e:
-        raise HTTPException(
-            500, ErrorDetail(message="Anthropic API key is missing or invalid.").model_dump()
-        ) from e
-    except anthropic.RateLimitError as e:
-        raise HTTPException(
-            429, ErrorDetail(message="Rate limited by the model API; try again.").model_dump()
-        ) from e
-    except anthropic.APIError as e:
-        raise HTTPException(
-            502, ErrorDetail(message=f"Model API error: {e.message}").model_dump()
-        ) from e
-    except anthropic.AnthropicError as e:  # e.g. no credentials configured
-        raise HTTPException(500, ErrorDetail(message=str(e)).model_dump()) from e
+        ans = db.ask(req.question.strip(), provider=provider, context=_context(req))
+    except Exception as e:
+        status, detail = error_detail(e)
+        raise HTTPException(status, detail.model_dump()) from e
+    return to_response(ans, provider, db.model_name(provider))
 
-    rows = [[to_json_value(v) for v in r] for r in ans.result.rows]
-    chart: ChartSpec = pick_chart(ans.result.columns, rows)
-    return AskResponse(
-        question=ans.question,
-        provider=provider,
-        model=db.model_name(provider),
-        sql=ans.sql,
-        explanation=ans.explanation,
-        columns=ans.result.columns,
-        rows=rows,
-        truncated=ans.result.truncated,
-        chart=ChartOut(**chart.__dict__),
-        attempts=_attempts(ans.attempts),
+
+@app.post("/api/ask/stream")
+def ask_stream(req: AskRequest, db: DB) -> StreamingResponse:
+    """Same as /api/ask, as Server-Sent Events: progress events while the pipeline
+    runs, then one `result` or `error` event."""
+    provider = req.provider or db.settings.provider
+    events: queue.Queue[dict | None] = queue.Queue()
+
+    def work() -> None:
+        try:
+            ans = db.ask(
+                req.question.strip(),
+                provider=provider,
+                context=_context(req),
+                on_event=events.put,
+            )
+            result = to_response(ans, provider, db.model_name(provider))
+            events.put({"type": "result", "data": result.model_dump()})
+        except Exception as e:  # reported to the client as an event
+            status, detail = error_detail(e)
+            events.put({"type": "error", "status": status, "detail": detail.model_dump()})
+        finally:
+            events.put(None)
+
+    threading.Thread(target=work, daemon=True).start()
+
+    def stream() -> Iterator[str]:
+        while (event := events.get()) is not None:
+            yield f"data: {json.dumps(event, default=str)}\n\n"
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@app.post("/api/run", response_model=AskResponse, responses={422: {"model": ErrorDetail}})
+def run(req: RunRequest, db: DB) -> AskResponse:
+    """Run SQL the user edited. Same read-only validation and connection."""
+    try:
+        ans = db.run(req.sql)
+    except Exception as e:
+        status, detail = error_detail(e)
+        raise HTTPException(status, detail.model_dump()) from e
+    return to_response(ans, "manual", "Edited by you")

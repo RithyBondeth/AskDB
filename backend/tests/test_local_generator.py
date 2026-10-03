@@ -111,3 +111,11 @@ def test_unreachable_server_gives_friendly_error():
     )
     with pytest.raises(GenerationError, match="Is Ollama"):
         gen.generate("q")
+
+
+def test_follow_up_context_goes_into_the_question():
+    from askdb.generate import Turn
+
+    prompt = build_prompt("sqlite", "DDL", "only 2012", None, None, [Turn("by year?", "SELECT 1")])
+    assert "Earlier in this conversation:\nQ: by year?\n```sql\nSELECT 1\n```" in prompt
+    assert "Now answer this follow-up:\n\nonly 2012" in prompt

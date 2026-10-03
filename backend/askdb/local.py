@@ -16,7 +16,7 @@ from typing import Literal
 
 import httpx
 
-from askdb.generate import Generation, GenerationError, Repair
+from askdb.generate import Generation, GenerationError, Repair, Turn
 
 SYSTEM = (
     "You are a data science expert. Below, you are provided with a database schema and a natural"
@@ -76,10 +76,19 @@ _SQL_BLOCK = re.compile(r"```sql\s*(.*?)\s*```", re.DOTALL | re.IGNORECASE)
 _ANSWER = re.compile(r"<answer>(.*?)(?:</answer>|$)", re.DOTALL)
 
 
-def build_question(question: str, reference_date: str | None, repairs: list[Repair] | None) -> str:
-    """The model is single-turn, so context and failed attempts go into the question
-    (the same slot OmniSQL uses for "external knowledge")."""
-    parts = [question]
+def build_question(
+    question: str,
+    reference_date: str | None,
+    repairs: list[Repair] | None,
+    context: list[Turn] | None = None,
+) -> str:
+    """The model is single-turn, so earlier turns, context, and failed attempts go into
+    the question (the same slot OmniSQL uses for "external knowledge")."""
+    parts = []
+    if context:
+        earlier = "\n\n".join(f"Q: {t.question}\n```sql\n{t.sql}\n```" for t in context)
+        parts.append(f"Earlier in this conversation:\n{earlier}\n\nNow answer this follow-up:")
+    parts.append(question)
     if reference_date:
         parts.append(f"(Treat {reference_date} as today when resolving relative dates.)")
     for r in repairs or []:
@@ -96,11 +105,12 @@ def build_prompt(
     question: str,
     reference_date: str | None = None,
     repairs: list[Repair] | None = None,
+    context: list[Turn] | None = None,
 ) -> str:
     user = USER_TEMPLATE.format(
         engine=ENGINE_NAMES.get(dialect, dialect),
         schema=schema_ddl,
-        question=build_question(question, reference_date, repairs),
+        question=build_question(question, reference_date, repairs, context),
         output_format=OUTPUT_FORMAT,
     )
     # Qwen2 ChatML, as produced by the model's tokenizer chat template.
@@ -139,7 +149,9 @@ class LocalGenerator:
         max_tokens: int = 6144,
         context_window: int = 16384,
         client: httpx.Client | None = None,
+        context: list[Turn] | None = None,
     ):
+        self.context = context or []
         self.dialect = dialect
         self.schema_ddl = schema_ddl
         self.model = model

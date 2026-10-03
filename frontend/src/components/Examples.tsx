@@ -1,13 +1,4 @@
-import { CalendarRange, ChartColumn, Crown, Globe, Trophy, Users } from "lucide-react";
-
-const EXAMPLES = [
-  { icon: Crown, text: "Which artist has the most albums?" },
-  { icon: Globe, text: "Total revenue by country, top 10" },
-  { icon: CalendarRange, text: "Revenue per month in 2013" },
-  { icon: Trophy, text: "Who are the top 5 customers by total spend?" },
-  { icon: ChartColumn, text: "How many tracks are in each genre?" },
-  { icon: Users, text: "What was our revenue last quarter?" },
-];
+import { EXAMPLES } from "@/lib/examples";
 
 export default function Examples({
   onPick,

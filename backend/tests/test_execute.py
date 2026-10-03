@@ -66,3 +66,19 @@ def test_long_query_times_out(db_path):
     )
     with pytest.raises(QueryError, match="timed out"):
         run_query(engine, endless, row_limit=10)
+
+
+def test_events_follow_the_pipeline(engine, scripted):
+    events = []
+    answer("?", scripted("SELECT FROM", "SELECT 1"), engine, "sqlite", on_event=events.append)
+    kinds = [(e["type"], e.get("stage")) for e in events]
+    assert kinds == [
+        ("stage", "generate"),
+        ("generated", None),
+        ("stage", "validate"),
+        ("attempt_failed", "validate"),  # syntax error: never executed
+        ("stage", "generate"),
+        ("generated", None),
+        ("stage", "validate"),
+        ("stage", "execute"),
+    ]

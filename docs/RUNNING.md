@@ -114,14 +114,24 @@ for example *"Which artist has the most albums?"*
 
 To stop either part, press `Ctrl+C` in its terminal.
 
-### What you should see
+### What you can do
 
-1. The SQL that was generated. If the first attempt failed, you'll see each
-   attempt and the error that was sent back to the model.
-2. A one-line explanation of the query.
-3. A bar or line chart, when the result has a shape that suits one.
-4. The result table.
-5. The database schema in the sidebar.
+- **Ask, then follow up.** Answers stack up as a conversation, and follow-ups
+  such as "only for 2012" build on the earlier queries. **New chat** starts over.
+- **Watch it work.** The Generate → Validate → Execute → Present steps update
+  live. A failed attempt shows as "self-correcting", and you can expand it
+  afterwards to see what went wrong.
+- **Explore the result.** Switch between Chart, Table, and SQL. Click a column
+  header to sort, filter rows, switch bar/line, or download CSV.
+- **Edit the SQL.** In the SQL tab, click **Edit**, change the query, and press
+  **Run** (or `⌘↵`). It is still validated as read-only. **Revert** brings back
+  the model's version.
+- **Use the keyboard.** `⌘K` (`Ctrl+K` on Windows/Linux) opens the command
+  palette, and `/` jumps to the question box.
+- **Share.** **Share** copies a link like `http://localhost:3000/?q=...` that
+  asks the same question when opened.
+- **Build questions from the schema.** Click a table or column in the sidebar
+  (the panel button on mobile) to insert its name into your question.
 
 ---
 

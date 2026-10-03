@@ -23,12 +23,16 @@ export default function ResultChart({
   columns,
   rows,
   chart,
+  type,
 }: {
   columns: string[];
   rows: Cell[][];
   chart: ChartSpec;
+  /** Override the backend's choice (the user's bar/line switch). */
+  type?: "bar" | "line";
 }) {
   if (chart.type === "none" || !chart.x || !chart.y?.length) return null;
+  const kind = type ?? chart.type;
 
   const data = rows.map((r) => Object.fromEntries(columns.map((c, i) => [c, r[i]])));
   const series = chart.y.slice(0, SERIES.length);
@@ -76,7 +80,7 @@ export default function ResultChart({
   return (
     <div className="h-80 w-full">
       <ResponsiveContainer width="100%" height="100%">
-        {chart.type === "line" ? (
+        {kind === "line" ? (
           <LineChart data={data} margin={{ top: 12, right: 16, bottom: 4, left: 0 }}>
             <CartesianGrid stroke="var(--border)" vertical={false} />
             {xAxis}

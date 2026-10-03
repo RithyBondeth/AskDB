@@ -1,6 +1,8 @@
 // Mirrors the response models in backend/api/main.py.
 
 export type Cell = string | number | boolean | null;
+export type Provider = "claude" | "local";
+export type Stage = "generate" | "validate" | "execute";
 
 export interface Attempt {
   sql: string;
@@ -15,11 +17,9 @@ export interface ChartSpec {
   reason: string;
 }
 
-export type Provider = "claude" | "local";
-
 export interface AskResponse {
   question: string;
-  provider: Provider;
+  provider: Provider | "manual";
   model: string;
   sql: string;
   explanation: string;
@@ -35,9 +35,15 @@ export interface AskError {
   attempts: Attempt[];
 }
 
+export interface SchemaColumn {
+  name: string;
+  type: string;
+  primary_key?: boolean;
+}
+
 export interface SchemaTable {
   name: string;
-  columns: { name: string; type: string; primary_key?: boolean }[];
+  columns: SchemaColumn[];
 }
 
 export interface SchemaResponse {
@@ -51,4 +57,40 @@ export interface HealthResponse {
   tables: number;
   default_provider: Provider;
   providers: Record<Provider, string>;
+}
+
+/** Events from POST /api/ask/stream. */
+export type StreamEvent =
+  | { type: "stage"; stage: Stage; attempt?: number }
+  | { type: "generated"; attempt: number; sql: string }
+  | {
+      type: "attempt_failed";
+      attempt: number;
+      stage: "validate" | "execute";
+      error: string;
+      sql: string;
+      will_retry: boolean;
+    }
+  | { type: "result"; data: AskResponse }
+  | { type: "error"; status: number; detail: AskError };
+
+/** Live progress of one question, built from stream events. */
+export interface Progress {
+  stage: Stage | "present" | null;
+  attempt: number;
+  failures: { attempt: number; stage: string; error: string }[];
+}
+
+/** One question and its answer in the conversation. */
+export interface Turn {
+  id: string;
+  question: string;
+  provider: Provider;
+  status: "running" | "done" | "error";
+  progress: Progress;
+  startedAt: number;
+  seconds?: number;
+  data?: AskResponse;
+  original?: AskResponse; // the model's answer, kept when the user edits the SQL
+  error?: AskError;
 }

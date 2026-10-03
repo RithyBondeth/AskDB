@@ -10,8 +10,8 @@ from sqlalchemy import Engine
 
 from askdb.config import Settings, get_settings
 from askdb.db import make_engine
-from askdb.execute import Answer, answer
-from askdb.generate import ClaudeGenerator, SQLGenerator, build_system_prompt
+from askdb.execute import Answer, EventHandler, answer, run_sql
+from askdb.generate import ClaudeGenerator, SQLGenerator, Turn, build_system_prompt
 from askdb.local import LocalGenerator
 from askdb.schema import Schema, introspect, link_tables
 
@@ -45,9 +45,16 @@ class AskDB:
         provider = provider or self.settings.provider
         return self.settings.local_model if provider == "local" else self.settings.model
 
-    def generator_for(self, question: str, provider: Provider | None = None) -> SQLGenerator:
+    def generator_for(
+        self,
+        question: str,
+        provider: Provider | None = None,
+        context: list[Turn] | None = None,
+    ) -> SQLGenerator:
         provider = provider or self.settings.provider
-        tables = link_tables(self.schema, question)
+        # Link on the whole conversation so follow-ups keep the tables they build on.
+        linking_text = " ".join([*(t.question for t in context or []), question])
+        tables = link_tables(self.schema, linking_text)
         if provider == "local":
             return LocalGenerator(
                 dialect=self.schema.dialect,
@@ -57,6 +64,7 @@ class AskDB:
                 api=self.settings.local_api,
                 reference_date=self.settings.reference_date,
                 timeout_s=self.settings.local_timeout_s,
+                context=context,
             )
         system = build_system_prompt(
             dialect=self.schema.dialect,
@@ -65,7 +73,11 @@ class AskDB:
             reference_date=self.settings.reference_date,
         )
         return ClaudeGenerator(
-            system, model=self.settings.model, effort=self.settings.effort, client=self.client
+            system,
+            model=self.settings.model,
+            effort=self.settings.effort,
+            client=self.client,
+            context=context,
         )
 
     def ask(
@@ -73,12 +85,18 @@ class AskDB:
         question: str,
         generator: SQLGenerator | None = None,
         provider: Provider | None = None,
+        context: list[Turn] | None = None,
+        on_event: EventHandler | None = None,
     ) -> Answer:
         return answer(
             question,
-            generator or self.generator_for(question, provider),
+            generator or self.generator_for(question, provider, context),
             self.engine,
             self.schema.dialect,
             max_retries=self.settings.max_retries,
             row_limit=self.settings.row_limit,
+            on_event=on_event,
         )
+
+    def run(self, sql: str) -> Answer:
+        return run_sql(sql, self.engine, self.schema.dialect, self.settings.row_limit)

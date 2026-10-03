@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronRight, Database, History, KeyRound, Search, Trash2 } from "lucide-react";
+import { ChevronRight, Database, History, KeyRound, Plus, Search, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import type { SchemaResponse } from "@/lib/types";
@@ -9,23 +9,73 @@ export default function Sidebar({
   history,
   onPick,
   onClearHistory,
+  onInsert,
   disabled,
 }: {
   history: string[];
   onPick: (q: string) => void;
   onClearHistory: () => void;
+  onInsert: (text: string) => void;
   disabled: boolean;
 }) {
   return (
-    <aside className="flex w-full shrink-0 flex-col gap-4 lg:sticky lg:top-20 lg:w-80 lg:self-start">
+    <div className="flex w-full flex-col gap-4">
       <HistoryPanel
         history={history}
         onPick={onPick}
         onClear={onClearHistory}
         disabled={disabled}
       />
-      <SchemaPanel />
-    </aside>
+      <SchemaPanel onInsert={onInsert} />
+    </div>
+  );
+}
+
+/** The sidebar as a slide-over panel on small screens. */
+export function SidebarDrawer({
+  open,
+  onClose,
+  children,
+}: {
+  open: boolean;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+  if (!open) return null;
+  return (
+    <div
+      className="fixed inset-0 z-40 lg:hidden"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Schema and history"
+    >
+      <button
+        type="button"
+        aria-label="Close"
+        onClick={onClose}
+        className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+      />
+      <div className="animate-slide-in absolute inset-y-0 right-0 flex w-[min(22rem,90vw)] flex-col gap-4 overflow-y-auto border-l border-border bg-background p-4">
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-semibold">Explore</span>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="grid size-8 place-items-center rounded-md text-muted hover:bg-surface-2"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
   );
 }
 
@@ -100,7 +150,7 @@ function HistoryPanel({
   );
 }
 
-function SchemaPanel() {
+function SchemaPanel({ onInsert }: { onInsert: (text: string) => void }) {
   const [schema, setSchema] = useState<SchemaResponse | null>(null);
   const [failed, setFailed] = useState(false);
   const [filter, setFilter] = useState("");
@@ -148,6 +198,9 @@ function SchemaPanel() {
       )}
       {schema && (
         <>
+          <p className="mb-2 text-[11px] text-subtle">
+            Click a table or column to add it to your question.
+          </p>
           <label className="relative mb-2 block">
             <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-subtle" />
             <input
@@ -162,23 +215,42 @@ function SchemaPanel() {
             {tables.map((t) => (
               <li key={t.name}>
                 <details className="group" open={!!filter.trim()}>
-                  <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-md px-1.5 py-1.5 font-mono text-[13px] transition select-none hover:bg-surface-2">
+                  <summary className="group/row flex cursor-pointer list-none items-center gap-1.5 rounded-md px-1.5 py-1.5 font-mono text-[13px] transition select-none hover:bg-surface-2">
                     <ChevronRight className="size-3.5 text-subtle transition group-open:rotate-90" />
                     {t.name}
-                    <span className="ml-auto font-sans text-[11px] text-subtle">
+                    <span className="ml-auto font-sans text-[11px] text-subtle group-hover/row:hidden">
                       {t.columns.length}
                     </span>
+                    <button
+                      type="button"
+                      title={`Insert “${t.name}” into your question`}
+                      aria-label={`Insert ${t.name} into your question`}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        onInsert(t.name);
+                      }}
+                      className="ml-auto hidden size-5 place-items-center rounded text-accent-ink hover:bg-accent-soft group-hover/row:grid"
+                    >
+                      <Plus className="size-3.5" />
+                    </button>
                   </summary>
                   <ul className="mt-0.5 mb-1.5 ml-4 border-l border-border pl-3">
                     {t.columns.map((c) => (
-                      <li key={c.name} className="flex items-center gap-2 py-0.5 font-mono text-xs">
-                        {c.primary_key && (
-                          <KeyRound className="size-3 text-accent" aria-label="Primary key" />
-                        )}
-                        <span>{c.name}</span>
-                        <span className="ml-auto text-[11px] text-subtle">
-                          {c.type.toLowerCase()}
-                        </span>
+                      <li key={c.name}>
+                        <button
+                          type="button"
+                          onClick={() => onInsert(`${t.name}.${c.name}`)}
+                          title={`Insert ${t.name}.${c.name} into your question`}
+                          className="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left font-mono text-xs transition hover:bg-accent-soft hover:text-accent-ink"
+                        >
+                          {c.primary_key && (
+                            <KeyRound className="size-3 text-accent" aria-label="Primary key" />
+                          )}
+                          <span>{c.name}</span>
+                          <span className="ml-auto text-[11px] text-subtle">
+                            {c.type.toLowerCase()}
+                          </span>
+                        </button>
                       </li>
                     ))}
                   </ul>

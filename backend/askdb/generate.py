@@ -31,6 +31,14 @@ class Repair:
     error: str
 
 
+@dataclass
+class Turn:
+    """An earlier question in the same conversation and the SQL that answered it."""
+
+    question: str
+    sql: str
+
+
 class SQLGenerator(Protocol):
     def generate(self, question: str, repairs: list[Repair] | None = None) -> Generation: ...
 
@@ -47,9 +55,18 @@ def build_system_prompt(
     )
 
 
-def build_messages(question: str, repairs: list[Repair] | None = None) -> list[dict]:
-    """The question, then one assistant/user pair per failed attempt (error feedback)."""
-    messages: list[dict] = [{"role": "user", "content": f"Q: {question}"}]
+def build_messages(
+    question: str, repairs: list[Repair] | None = None, context: list[Turn] | None = None
+) -> list[dict]:
+    """Earlier turns of the conversation, the question, then one assistant/user pair
+    per failed attempt (error feedback)."""
+    messages: list[dict] = []
+    for t in context or []:
+        messages.append({"role": "user", "content": f"Q: {t.question}"})
+        messages.append({"role": "assistant", "content": f"```sql\n{t.sql}\n```"})
+    if context:
+        question = f"{question}\n(This may be a follow-up to the questions above.)"
+    messages.append({"role": "user", "content": f"Q: {question}"})
     for r in repairs or []:
         messages.append({"role": "assistant", "content": f"```sql\n{r.sql}\n```"})
         messages.append({"role": "user", "content": REPAIR_PROMPT.format(sql=r.sql, error=r.error)})
@@ -79,8 +96,10 @@ class ClaudeGenerator:
         model: str = "claude-opus-5-5",
         effort: str = "medium",
         client: anthropic.Anthropic | None = None,
+        context: list[Turn] | None = None,
     ):
         self.system_prompt = system_prompt
+        self.context = context or []
         self.model = model
         self.effort = effort
         self.client = client or anthropic.Anthropic()
@@ -112,7 +131,7 @@ class ClaudeGenerator:
                     "cache_control": {"type": "ephemeral"},
                 }
             ],
-            messages=build_messages(question, repairs),
+            messages=build_messages(question, repairs, self.context),
             thinking={"type": "adaptive"},
             output_config={"effort": self.effort},
             # If a safety classifier declines, let the API retry on its

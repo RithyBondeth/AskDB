@@ -1,7 +1,7 @@
 "use client";
 
-import { ArrowUp, Bot, Cpu } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { ArrowUp, Bot, Cpu, CornerDownRight, Square } from "lucide-react";
+import { type RefObject, useEffect } from "react";
 
 import type { Provider } from "@/lib/types";
 
@@ -11,31 +11,35 @@ const PROVIDERS: { id: Provider; label: string; icon: typeof Bot }[] = [
 ];
 
 export default function Composer({
+  inputRef,
   value,
   onChange,
   onSubmit,
+  onStop,
   provider,
   onProviderChange,
   models,
   busy,
+  followUpTo,
 }: {
+  inputRef: RefObject<HTMLTextAreaElement | null>;
   value: string;
   onChange: (v: string) => void;
   onSubmit: () => void;
+  onStop: () => void;
   provider: Provider;
   onProviderChange: (p: Provider) => void;
   models: Record<Provider, string> | null;
   busy: boolean;
+  followUpTo: string | null;
 }) {
-  const ref = useRef<HTMLTextAreaElement>(null);
-
   // Grow with content, up to a few lines.
   useEffect(() => {
-    const el = ref.current;
+    const el = inputRef.current;
     if (!el) return;
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
-  }, [value]);
+  }, [value, inputRef]);
 
   return (
     <form
@@ -43,10 +47,16 @@ export default function Composer({
         e.preventDefault();
         onSubmit();
       }}
-      className="card group p-2 transition focus-within:border-accent/60 focus-within:shadow-[0_0_0_4px_var(--glow)]"
+      className="card p-2 shadow-lg transition focus-within:border-accent/60 focus-within:shadow-[0_0_0_4px_var(--glow)]"
     >
+      {followUpTo && (
+        <p className="flex items-center gap-1.5 truncate px-3 pt-1.5 text-xs text-subtle">
+          <CornerDownRight className="size-3 shrink-0" />
+          Follow-ups build on this conversation · last: “{followUpTo}”
+        </p>
+      )}
       <textarea
-        ref={ref}
+        ref={inputRef}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => {
@@ -58,7 +68,11 @@ export default function Composer({
         rows={1}
         maxLength={1000}
         aria-label="Question"
-        placeholder="Ask anything about your data… e.g. Which genres sell the most tracks?"
+        placeholder={
+          followUpTo
+            ? "Ask a follow-up… e.g. only for 2012"
+            : "Ask anything about your data… e.g. Which genres sell the most tracks?"
+        }
         className="block w-full resize-none bg-transparent px-3 pt-2.5 pb-1 text-base leading-relaxed outline-none placeholder:text-subtle"
       />
       <div className="flex flex-wrap items-center gap-2 px-1 pt-1">
@@ -89,21 +103,33 @@ export default function Composer({
         </div>
         {models && (
           <span className="hidden max-w-[16rem] truncate font-mono text-[11px] text-subtle md:inline">
-            {models[provider]}
+            {models[provider].split("/").at(-1)}
           </span>
         )}
         <span className="ml-auto hidden text-[11px] text-subtle sm:inline">
-          <kbd className="font-sans">Enter</kbd> to ask ·{" "}
-          <kbd className="font-sans">Shift+Enter</kbd> new line
+          <kbd className="font-sans">↵</kbd> ask · <kbd className="font-sans">⇧↵</kbd> new line ·{" "}
+          <kbd className="font-sans">⌘K</kbd> commands
         </span>
-        <button
-          type="submit"
-          disabled={busy || !value.trim()}
-          aria-label="Ask"
-          className="ml-auto grid size-9 place-items-center rounded-lg bg-accent text-on-accent shadow-sm transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-40 sm:ml-0"
-        >
-          <ArrowUp className="size-4.5" strokeWidth={2.5} />
-        </button>
+        {busy ? (
+          <button
+            type="button"
+            onClick={onStop}
+            aria-label="Stop"
+            title="Stop"
+            className="ml-auto grid size-9 place-items-center rounded-lg bg-foreground text-background shadow-sm transition hover:opacity-80 sm:ml-0"
+          >
+            <Square className="size-3.5" fill="currentColor" />
+          </button>
+        ) : (
+          <button
+            type="submit"
+            disabled={!value.trim()}
+            aria-label="Ask"
+            className="ml-auto grid size-9 place-items-center rounded-lg bg-accent text-on-accent shadow-sm transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-40 sm:ml-0"
+          >
+            <ArrowUp className="size-4.5" strokeWidth={2.5} />
+          </button>
+        )}
       </div>
     </form>
   );

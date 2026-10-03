@@ -6,6 +6,11 @@ returns an error, and answers with a table and an automatically chosen chart.
 
 > Demo GIF goes here: question → answer → self-correction.
 
+**Features:** follow-up questions in a chat thread · live pipeline progress
+(streamed) · self-correction you can inspect · edit and re-run the SQL ·
+sortable, filterable results with bar/line charts and CSV export · ⌘K command
+palette · share links (`?q=`) · light and dark themes.
+
 Works with **Claude** or an **open-source model running on your own machine**
 ([Arctic-Text2SQL-R1-7B](https://hf.co/Snowflake/Arctic-Text2SQL-R1-7B) via
 Ollama). Switch between them per question in the UI.
@@ -122,8 +127,10 @@ cd frontend && npm run lint && npm run build
 
 | Method | Path | Description |
 | --- | --- | --- |
-| `POST` | `/api/ask` | `{"question": "...", "provider": "claude" \| "local"}` → SQL, explanation, columns, rows, chart spec, every attempt, and the model that answered (`provider` is optional) |
-| `GET` | `/api/schema` | Tables and columns |
+| `POST` | `/api/ask` | `{"question": "...", "provider": "claude" \| "local", "context": [{"question", "sql"}]}` → SQL, explanation, columns, rows, chart spec, every attempt, and the model that answered. `provider` and `context` (up to 5 earlier turns, for follow-ups) are optional |
+| `POST` | `/api/ask/stream` | Same request as `/api/ask`, answered as Server-Sent Events: `stage`, `generated`, `attempt_failed` while it runs, then `result` or `error` |
+| `POST` | `/api/run` | `{"sql": "..."}` → runs SQL you edited, behind the same read-only validation |
+| `GET` | `/api/schema` | Tables and columns, with primary keys |
 | `GET` | `/api/health` | Status, dialect, table count, and available models |
 
 When every attempt fails, `/api/ask` returns 422 with the failed attempts, so the
@@ -168,6 +175,16 @@ measured. The model was trained single-turn, so failed attempts for
 self-correction go into the question instead of a chat history. The validator,
 read-only connection, and retry loop are shared with Claude, so both models get
 the same safety guarantees.
+
+**Follow-ups.** The UI sends the last three answered questions and their SQL
+as `context`. Claude sees them as earlier conversation turns. The open model is
+single-turn, so they go into its prompt as "earlier in this conversation".
+Schema linking also uses the earlier questions, so a follow-up keeps the
+tables it builds on.
+
+**Edited SQL is not trusted either.** `/api/run` uses the same validator and
+read-only connection as generated SQL, so editing a query can't be used to
+write to the database.
 
 **Prompt caching.** The system prompt (schema plus examples) is the same for
 every question, so it is cached. Only the question changes between requests.
