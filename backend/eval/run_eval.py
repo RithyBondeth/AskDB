@@ -1,0 +1,122 @@
+"""Execution-accuracy harness: does the predicted query return the same rows as the gold query?
+
+    uv run python eval/run_eval.py               # full dataset
+    uv run python eval/run_eval.py --limit 5     # quick smoke run
+    uv run python eval/run_eval.py --out eval/results/v1.json
+
+Each run calls the model once per question (plus repairs), so it costs money.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import time
+from collections import Counter
+from pathlib import Path
+from typing import Any
+
+from askdb.db import QueryError, run_query
+from askdb.execute import AnswerError
+from askdb.generate import GenerationError
+from askdb.pipeline import AskDB
+
+DATASET = Path(__file__).with_name("dataset.jsonl")
+# Gold queries can return more rows than the app shows; compare in full.
+COMPARE_LIMIT = 100_000
+
+
+def _norm(v: Any) -> Any:
+    """Make values comparable: round floats, so 1.0 == 1 and SUM drift is ignored."""
+    if isinstance(v, float):
+        return round(v, 2) if not math.isnan(v) else "NaN"
+    if isinstance(v, int) and not isinstance(v, bool):
+        return round(float(v), 2)
+    return v
+
+
+def _row_key(row: list[Any]) -> tuple:
+    # Compare rows as multisets of values, so column order (and NULLs) don't matter.
+    return tuple(sorted((_norm(v) for v in row), key=lambda x: (type(x).__name__, str(x))))
+
+
+def results_match(pred: list[list], gold: list[list], ordered: bool) -> bool:
+    """Execution match.
+
+    Gold columns must all be present; extra predicted columns are tolerated only
+    when every gold value still appears in the same row (e.g. the model also
+    returned the COUNT it sorted by).
+    """
+    if len(pred) != len(gold):
+        return False
+    pred_rows = [_row_key(r) for r in pred]
+    gold_rows = [_row_key(r) for r in gold]
+
+    def row_ok(p: tuple, g: tuple) -> bool:
+        if p == g:
+            return True
+        remaining = Counter(p)
+        remaining.subtract(Counter(g))
+        return all(n >= 0 for n in remaining.values())
+
+    if ordered:
+        return all(row_ok(p, g) for p, g in zip(pred_rows, gold_rows, strict=True))
+    # Unordered: greedy matching is fine for these small result sets.
+    unmatched = list(pred_rows)
+    for g in gold_rows:
+        hit = next((i for i, p in enumerate(unmatched) if row_ok(p, g)), None)
+        if hit is None:
+            return False
+        unmatched.pop(hit)
+    return True
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--out", type=Path, default=None, help="write per-question results JSON")
+    args = parser.parse_args()
+
+    rows = [json.loads(line) for line in DATASET.read_text().splitlines() if line.strip()]
+    rows = rows[: args.limit] if args.limit else rows
+    db = AskDB.from_settings()
+
+    results, hits, self_corrected = [], 0, 0
+    for row in rows:
+        started = time.monotonic()
+        gold = run_query(db.engine, row["gold_sql"], COMPARE_LIMIT).rows
+        record: dict[str, Any] = {"id": row["id"], "question": row["question"]}
+        try:
+            ans = db.ask(row["question"])
+            pred = run_query(db.engine, ans.sql, COMPARE_LIMIT).rows
+            ok = results_match(pred, gold, ordered=row.get("ordered", False))
+            record.update(sql=ans.sql, attempts=len(ans.attempts), match=ok)
+            self_corrected += ok and len(ans.attempts) > 1
+        except (AnswerError, GenerationError, QueryError) as e:
+            ok = False
+            record.update(sql=None, error=str(e), match=False)
+        record["seconds"] = round(time.monotonic() - started, 1)
+        hits += ok
+        results.append(record)
+        print(f"{'PASS' if ok else 'FAIL'}  {row['id']:<24} {record.get('sql') or record['error']}")
+
+    total = len(rows)
+    accuracy = hits / total if total else 0.0
+    print(f"\nExecution accuracy: {hits}/{total} = {accuracy:.1%}")
+    print(f"Passed only after self-correction: {self_corrected}")
+
+    if args.out:
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        summary = {
+            "model": db.settings.model,
+            "effort": db.settings.effort,
+            "accuracy": accuracy,
+            "results": results,
+        }
+        args.out.write_text(json.dumps(summary, indent=2, default=str))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

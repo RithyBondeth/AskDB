@@ -1,0 +1,15 @@
+{"id": "artists-count", "question": "How many artists are in the database?", "gold_sql": "SELECT COUNT(*) FROM Artist"}
+{"id": "most-albums", "question": "Which artist has the most albums?", "gold_sql": "SELECT ar.Name FROM Album al JOIN Artist ar ON ar.ArtistId = al.ArtistId GROUP BY ar.ArtistId ORDER BY COUNT(*) DESC LIMIT 1"}
+{"id": "top-genres", "question": "What are the 5 genres with the most tracks?", "gold_sql": "SELECT g.Name, COUNT(*) AS n FROM Track t JOIN Genre g ON g.GenreId = t.GenreId GROUP BY g.GenreId ORDER BY n DESC LIMIT 5", "ordered": true}
+{"id": "revenue-by-country", "question": "Total revenue for each billing country", "gold_sql": "SELECT BillingCountry, SUM(Total) FROM Invoice GROUP BY BillingCountry"}
+{"id": "top-customers", "question": "Who are the top 5 customers by total spend? Give first and last name.", "gold_sql": "SELECT c.FirstName, c.LastName, SUM(i.Total) AS spend FROM Customer c JOIN Invoice i ON i.CustomerId = c.CustomerId GROUP BY c.CustomerId ORDER BY spend DESC LIMIT 5", "ordered": true}
+{"id": "revenue-2013", "question": "What was total revenue in 2013?", "gold_sql": "SELECT SUM(Total) FROM Invoice WHERE strftime('%Y', InvoiceDate) = '2013'"}
+{"id": "revenue-by-year", "question": "Total revenue per year", "gold_sql": "SELECT strftime('%Y', InvoiceDate) AS year, SUM(Total) FROM Invoice GROUP BY year"}
+{"id": "longest-track", "question": "What is the name of the longest track?", "gold_sql": "SELECT Name FROM Track ORDER BY Milliseconds DESC LIMIT 1"}
+{"id": "employees-calgary", "question": "How many employees live in Calgary?", "gold_sql": "SELECT COUNT(*) FROM Employee WHERE City = 'Calgary'"}
+{"id": "media-types", "question": "List all media types", "gold_sql": "SELECT Name FROM MediaType"}
+{"id": "best-rep", "question": "Which sales support agent's customers generated the most revenue? Give the agent's first and last name.", "gold_sql": "SELECT e.FirstName, e.LastName FROM Employee e JOIN Customer c ON c.SupportRepId = e.EmployeeId JOIN Invoice i ON i.CustomerId = c.CustomerId GROUP BY e.EmployeeId ORDER BY SUM(i.Total) DESC LIMIT 1"}
+{"id": "empty-playlists", "question": "Which playlists have no tracks?", "gold_sql": "SELECT p.Name FROM Playlist p LEFT JOIN PlaylistTrack pt ON pt.PlaylistId = p.PlaylistId WHERE pt.PlaylistId IS NULL"}
+{"id": "avg-track-length-rock", "question": "What is the average length in seconds of Rock tracks?", "gold_sql": "SELECT AVG(t.Milliseconds) / 1000.0 FROM Track t JOIN Genre g ON g.GenreId = t.GenreId WHERE g.Name = 'Rock'"}
+{"id": "customers-no-company", "question": "How many customers do not have a company listed?", "gold_sql": "SELECT COUNT(*) FROM Customer WHERE Company IS NULL"}
+{"id": "last-quarter-revenue", "question": "What was our revenue last quarter?", "gold_sql": "SELECT SUM(Total) FROM Invoice WHERE InvoiceDate >= '2013-07-01' AND InvoiceDate < '2013-10-01'"}
