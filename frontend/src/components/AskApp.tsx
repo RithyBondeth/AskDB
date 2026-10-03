@@ -364,14 +364,12 @@ export default function AskApp() {
       configured={health?.configured ?? null}
       busy={busy}
       followUpTo={lastDone?.question ?? null}
-      example={schema?.suggestions[0]}
     />
   );
 
   return (
     <div className="page-backdrop flex min-h-screen flex-col overflow-x-clip">
       <Header
-        status={schema ? { dialect: schema.dialect, tables: schema.tables.length } : null}
         offline={offline}
         picker={
           <DatabasePicker
@@ -403,11 +401,8 @@ export default function AskApp() {
                     Ask your data <span className="hl">anything.</span>
                   </h1>
                   <p className="mx-auto mt-4 max-w-md text-[17px] leading-relaxed text-muted md:mx-0">
-                    Type a question in plain English. AskDB writes the SQL, checks it{" "}
-                    <span className="squiggle text-accent">
-                      <span className="text-foreground">can’t change anything</span>
-                    </span>
-                    , runs it, and fixes its own mistakes.
+                    Type a question in plain English. AskDB writes the SQL, checks it can’t change
+                    anything, runs it, and fixes its own mistakes.
                   </p>
                 </div>
                 <Doodle
@@ -418,7 +413,7 @@ export default function AskApp() {
               <div className="mx-auto w-full max-w-4xl">{composer}</div>
               <div className="mx-auto flex w-full max-w-4xl flex-col gap-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="font-hand text-2xl leading-none font-bold">
+                  <p className="font-bold">
                     Try asking{" "}
                     {current ? (
                       <span className="font-sans text-sm font-normal text-muted">
@@ -457,7 +452,15 @@ export default function AskApp() {
                 >
                   Open Doodles
                 </a>{" "}
-                (Pablo Stanley, CC0)
+                (Pablo Stanley, CC0) ·{" "}
+                <a
+                  href="https://github.com/RithyBondeth/AskDB"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="underline decoration-dotted underline-offset-2 hover:text-foreground"
+                >
+                  Source code
+                </a>
               </p>
             </div>
           ) : (
@@ -507,13 +510,7 @@ export default function AskApp() {
                 <div ref={endRef} />
               </div>
               <div className="sticky bottom-0 z-20 bg-gradient-to-t from-background via-background/95 to-transparent pt-6 pb-4">
-                <div className="mx-auto w-full max-w-4xl">
-                  {composer}
-                  <p className="mt-2 flex items-center justify-center gap-1.5 text-[11px] text-subtle">
-                    <ShieldCheck className="size-3" />
-                    Read-only: every query is validated and runs on a read-only connection.
-                  </p>
-                </div>
+                <div className="mx-auto w-full max-w-4xl">{composer}</div>
               </div>
             </>
           )}

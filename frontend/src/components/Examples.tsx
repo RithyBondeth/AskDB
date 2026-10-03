@@ -10,9 +10,8 @@ function iconFor(q: string) {
   return Sparkles;
 }
 
-// Sticky-note colors and a slight, varied tilt.
+// Soft sticky-note colors.
 const NOTES = ["bg-note-yellow", "bg-note-pink", "bg-note-mint", "bg-note-sky"];
-const TILTS = [-1.2, 0.8, -0.6, 1.1, -0.9, 0.5];
 
 export default function Examples({
   items,
@@ -33,8 +32,7 @@ export default function Examples({
             type="button"
             onClick={() => onPick(text)}
             disabled={disabled}
-            style={{ transform: `rotate(${TILTS[i % TILTS.length]}deg)` }}
-            className={`note flex items-start gap-3 px-4 py-3.5 text-left text-[15px] leading-snug text-foreground disabled:pointer-events-none disabled:opacity-50 ${NOTES[i % NOTES.length]}`}
+            className={`note flex items-start gap-3 px-4 py-3 text-left text-[15px] leading-snug text-foreground disabled:pointer-events-none disabled:opacity-50 ${NOTES[i % NOTES.length]}`}
           >
             <Icon className="mt-0.5 size-4.5 shrink-0" strokeWidth={2.25} />
             {text}

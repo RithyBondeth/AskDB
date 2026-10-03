@@ -46,7 +46,7 @@ export default function ResultChart({
   };
   const axis = {
     stroke: "var(--ink)",
-    tick: { fill: "var(--muted)", fontSize: 12, fontFamily: "var(--font-shantell)" },
+    tick: { fill: "var(--muted)", fontSize: 12, fontFamily: "var(--font-nunito)" },
     tickLine: false,
   };
   const tooltip = {

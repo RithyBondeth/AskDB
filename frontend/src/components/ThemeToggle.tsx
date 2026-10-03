@@ -24,7 +24,7 @@ export default function ThemeToggle() {
       onClick={() => setTheme(nextTheme(theme))}
       title={`Theme: ${theme}`}
       aria-label={`Theme: ${theme}. Click to change.`}
-      className="btn-paper grid size-8 place-items-center text-foreground sm:size-9"
+      className="btn-paper grid size-9 place-items-center text-muted hover:text-foreground"
     >
       <Icon className="size-4" />
     </button>

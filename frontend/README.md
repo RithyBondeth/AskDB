@@ -37,11 +37,12 @@ CORS setup is needed.
 **Keyboard:** `↵` ask · `⇧↵` new line · `⌘K` / `Ctrl+K` command palette · `/`
 focus the question box · `⌘↵` run edited SQL.
 
-**Design.** A hand-drawn "doodle" look: dotted paper with ink outlines, uneven
-corners, hard offset shadows, sticky notes, and a highlighter in light mode, and
-chalk on a blackboard in dark mode. Headings use Caveat, the interface uses
-Shantell Sans, and SQL uses Geist Mono. The building blocks (`.card`, `.sketch`,
-`.btn-ink`, `.btn-paper`, `.note`, `.hl`, `.squiggle`) and all colors are in
-`src/app/globals.css`. Illustrations from [Open Doodles](https://www.opendoodles.com)
-(Pablo Stanley, CC0) mark the empty, thinking, error, no-rows, and upload states.
+**Design.** A calm, hand-drawn "doodle" look: faint dotted paper, thin ink
+lines with softly uneven corners, light offset shadows, pastel suggestion cards,
+and a highlighter mark in light mode, and chalk on a blackboard in dark mode.
+The interface uses Nunito for readability. The handwritten Caveat appears only
+in the logo and the home headline, and SQL uses Geist Mono. The building blocks
+(`.card`, `.sketch`, `.btn-ink`, `.btn-paper`, `.note`, `.hl`) and all colors
+are in `src/app/globals.css`. Illustrations from [Open Doodles](https://www.opendoodles.com)
+(Pablo Stanley, CC0) mark the home, thinking, error, no-rows, and upload states.
 Chart colors are a colorblind-validated categorical palette for each theme.
