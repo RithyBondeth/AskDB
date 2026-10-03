@@ -1,36 +1,66 @@
 "use client";
 
-import { ShieldCheck } from "lucide-react";
+import { ShieldCheck, Upload } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import CommandPalette, { buildCommands } from "@/components/CommandPalette";
 import Composer from "@/components/Composer";
+import DatabasePicker from "@/components/DatabasePicker";
 import Examples from "@/components/Examples";
 import Header from "@/components/Header";
 import Sidebar, { SidebarDrawer } from "@/components/Sidebar";
 import TurnView from "@/components/TurnView";
-import { askStream, runSql } from "@/lib/stream";
+import UploadDialog from "@/components/UploadDialog";
+import { askStream, deleteDatabase, runSql } from "@/lib/stream";
 import { getTheme, nextTheme, setTheme } from "@/lib/theme";
-import type { AskError, HealthResponse, Provider, StreamEvent, Turn } from "@/lib/types";
+import type {
+  AskError,
+  DatabaseInfo,
+  DatabasesResponse,
+  HealthResponse,
+  Provider,
+  SchemaResponse,
+  StreamEvent,
+  Turn,
+} from "@/lib/types";
 
 const HISTORY_KEY = "askdb-history";
 const HISTORY_MAX = 8;
 const CONTEXT_TURNS = 3; // earlier answers sent with a follow-up
+const DATABASE_KEY = "askdb-database";
+const SAMPLE = "sample";
 
-function loadHistory(): string[] {
+// Recent questions are kept per database: a question only makes sense for its data.
+function loadHistory(database: string): string[] {
   try {
-    const raw = JSON.parse(localStorage.getItem(HISTORY_KEY) ?? "[]");
+    const raw = JSON.parse(localStorage.getItem(`${HISTORY_KEY}:${database}`) ?? "[]");
     return Array.isArray(raw) ? raw.filter((q) => typeof q === "string").slice(0, HISTORY_MAX) : [];
   } catch {
     return [];
   }
 }
 
-function saveHistory(items: string[]) {
+function saveHistory(database: string, items: string[]) {
   try {
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(items));
+    localStorage.setItem(`${HISTORY_KEY}:${database}`, JSON.stringify(items));
   } catch {
     // storage unavailable: history just won't persist
+  }
+}
+
+function saveDatabase(id: string) {
+  try {
+    localStorage.setItem(DATABASE_KEY, id);
+  } catch {
+    // storage unavailable
+  }
+}
+
+function loadDatabase(): string {
+  try {
+    return localStorage.getItem(DATABASE_KEY) ?? SAMPLE;
+  } catch {
+    return SAMPLE;
   }
 }
 
@@ -43,6 +73,12 @@ export default function AskApp() {
   const [history, setHistory] = useState<string[]>([]);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [databases, setDatabases] = useState<DatabaseInfo[]>([]);
+  const [uploads, setUploads] = useState({ allowed: false, maxMb: 50 });
+  const [database, setDatabase] = useState<string>(SAMPLE);
+  const [schema, setSchema] = useState<SchemaResponse | null>(null);
+  const [schemaFailed, setSchemaFailed] = useState(false);
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -50,10 +86,12 @@ export default function AskApp() {
   // Latest values for callbacks that outlive a render (stream handlers, shortcuts).
   const providerRef = useRef(provider);
   const turnsRef = useRef(turns);
+  const databaseRef = useRef(database);
   useEffect(() => {
     providerRef.current = provider;
     turnsRef.current = turns;
-  }, [provider, turns]);
+    databaseRef.current = database;
+  }, [provider, turns, database]);
 
   const busy = turns.some((t) => t.status === "running");
   const lastDone = [...turns].reverse().find((t) => t.status === "done");
@@ -65,7 +103,7 @@ export default function AskApp() {
   const remember = useCallback((q: string) => {
     setHistory((h) => {
       const next = [q, ...h.filter((x) => x !== q)].slice(0, HISTORY_MAX);
-      saveHistory(next);
+      saveHistory(databaseRef.current, next);
       return next;
     });
   }, []);
@@ -87,6 +125,7 @@ export default function AskApp() {
         id,
         question: trimmed,
         provider: providerRef.current,
+        database: databaseRef.current,
         status: "running",
         progress: { stage: "generate", attempt: 1, failures: [] },
         startedAt: Date.now(),
@@ -120,6 +159,7 @@ export default function AskApp() {
         const data = await askStream({
           question: trimmed,
           provider: turn.provider,
+          database: turn.database,
           context,
           onEvent,
           signal: controller.signal,
@@ -158,27 +198,77 @@ export default function AskApp() {
     inputRef.current?.focus();
   }, []);
 
-  // Health check, then answer a shared ?q= link once.
+  const refreshDatabases = useCallback(async (): Promise<DatabaseInfo[]> => {
+    try {
+      const res = await fetch("/api/databases");
+      if (!res.ok) return [];
+      const body = (await res.json()) as DatabasesResponse;
+      setDatabases(body.databases);
+      setUploads({ allowed: body.allow_uploads, maxMb: body.max_upload_mb });
+      return body.databases;
+    } catch {
+      return [];
+    }
+  }, []);
+
+  /** Switch database. A conversation belongs to one database, so this starts a new chat. */
+  const selectDatabase = useCallback(
+    (id: string) => {
+      if (id !== databaseRef.current) newChat();
+      databaseRef.current = id;
+      setDatabase(id);
+      saveDatabase(id);
+    },
+    [newChat],
+  );
+
+  // Schema, suggested questions, and recent questions for the selected database.
   useEffect(() => {
+    let cancelled = false;
     // localStorage is only available after mount.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setHistory(loadHistory());
-    const shared = new URLSearchParams(window.location.search).get("q");
-    fetch("/api/health")
-      .then((r) => (r.ok ? r.json() : Promise.reject()))
-      .then((h: HealthResponse) => {
+    setHistory(loadHistory(database));
+    setSchema(null);
+    setSchemaFailed(false);
+    fetch(`/api/schema?database=${encodeURIComponent(database)}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+      .then((s: SchemaResponse) => !cancelled && setSchema(s))
+      .catch((status) => {
+        if (cancelled) return;
+        if (status === 404 && database !== SAMPLE)
+          selectDatabase(SAMPLE); // deleted elsewhere
+        else setSchemaFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [database, selectDatabase]);
+
+  // Startup, in order: pick the database (?db= link or last used), check health,
+  // then answer a shared ?q= link. Asking earlier would race the database switch.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const shared = params.get("q");
+    const initialDb = params.get("db") ?? loadDatabase();
+    (async () => {
+      const list = await refreshDatabases();
+      if (list.some((d) => d.id === initialDb)) selectDatabase(initialDb);
+      try {
+        const res = await fetch("/api/health");
+        if (!res.ok) throw new Error();
+        const h = (await res.json()) as HealthResponse;
         setHealth(h);
         setProvider(h.default_provider);
         providerRef.current = h.default_provider;
-      })
-      .catch(() => setOffline(true))
-      .finally(() => {
-        if (shared) {
-          window.history.replaceState(null, "", window.location.pathname);
-          ask(shared);
-        }
-      });
-  }, [ask]);
+      } catch {
+        setOffline(true);
+      }
+      if (shared) {
+        window.history.replaceState(null, "", window.location.pathname);
+        ask(shared);
+      }
+    })();
+  }, [ask, refreshDatabases, selectDatabase]);
 
   // Keyboard: ⌘K / Ctrl+K palette, "/" focuses the question box.
   useEffect(() => {
@@ -217,12 +307,17 @@ export default function AskApp() {
       // eslint-disable-next-line react-hooks/refs
       buildCommands({
         history,
+        suggestions: schema?.suggestions ?? [],
+        databases,
+        currentDatabase: database,
         ask,
         newChat,
         setProvider,
         cycleTheme: () => setTheme(nextTheme(getTheme())),
+        selectDatabase,
+        upload: uploads.allowed ? () => setUploadOpen(true) : null,
       }),
-    [history, ask, newChat],
+    [history, schema, databases, database, ask, newChat, selectDatabase, uploads.allowed],
   );
 
   const sidebar = (
@@ -231,12 +326,29 @@ export default function AskApp() {
       onPick={ask}
       onClearHistory={() => {
         setHistory([]);
-        saveHistory([]);
+        saveHistory(database, []);
       }}
       onInsert={insert}
       disabled={busy}
+      schema={schema}
+      schemaFailed={schemaFailed}
     />
   );
+
+  const current = databases.find((d) => d.id === database);
+
+  async function removeDatabase(db: DatabaseInfo) {
+    if (!window.confirm(`Delete “${db.name}”? This removes the uploaded data from the server.`)) {
+      return;
+    }
+    try {
+      await deleteDatabase(db.id);
+    } catch (e) {
+      window.alert((e as AskError).message);
+    }
+    await refreshDatabases();
+    if (db.id === databaseRef.current) selectDatabase(SAMPLE);
+  }
 
   const composer = (
     <Composer
@@ -250,14 +362,25 @@ export default function AskApp() {
       models={health?.providers ?? null}
       busy={busy}
       followUpTo={lastDone?.question ?? null}
+      example={schema?.suggestions[0]}
     />
   );
 
   return (
     <div className="page-backdrop flex min-h-screen flex-col">
       <Header
-        health={health}
+        status={schema ? { dialect: schema.dialect, tables: schema.tables.length } : null}
         offline={offline}
+        picker={
+          <DatabasePicker
+            databases={databases}
+            current={current}
+            onSelect={selectDatabase}
+            onUpload={() => setUploadOpen(true)}
+            onDelete={removeDatabase}
+            allowUploads={uploads.allowed}
+          />
+        }
         hasThread={turns.length > 0}
         onNewChat={newChat}
         onOpenPalette={() => setPaletteOpen(true)}
@@ -282,8 +405,32 @@ export default function AskApp() {
                 </p>
               </div>
               <div className="mx-auto w-full max-w-3xl">{composer}</div>
-              <div className="mx-auto w-full max-w-3xl">
-                <Examples onPick={ask} disabled={busy} />
+              <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs font-medium tracking-wide text-subtle uppercase">
+                    Try asking{" "}
+                    {current ? <span className="normal-case">· {current.name}</span> : null}
+                  </p>
+                  {uploads.allowed && (
+                    <button
+                      type="button"
+                      onClick={() => setUploadOpen(true)}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-accent/50 px-3 py-1 text-xs text-accent-ink transition hover:bg-accent-soft"
+                    >
+                      <Upload className="size-3.5" />
+                      Use your own data
+                    </button>
+                  )}
+                </div>
+                {schema ? (
+                  <Examples items={schema.suggestions} onPick={ask} disabled={busy} />
+                ) : (
+                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    {[0, 1, 2].map((i) => (
+                      <div key={i} className="skeleton h-14 rounded-xl" />
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           ) : (
@@ -298,7 +445,7 @@ export default function AskApp() {
                     models={health?.providers ?? null}
                     onRunSql={async (sql) => {
                       try {
-                        const res = await runSql(sql);
+                        const res = await runSql(sql, t.database);
                         update(t.id, (cur) => ({
                           ...cur,
                           original: cur.original ?? cur.data,
@@ -319,7 +466,9 @@ export default function AskApp() {
                     onRetry={() => ask(t.question)}
                     onFollowUp={ask}
                     onShare={async () => {
-                      const url = `${window.location.origin}/?q=${encodeURIComponent(t.question)}`;
+                      const db =
+                        t.database === SAMPLE ? "" : `&db=${encodeURIComponent(t.database)}`;
+                      const url = `${window.location.origin}/?q=${encodeURIComponent(t.question)}${db}`;
                       try {
                         await navigator.clipboard.writeText(url);
                       } catch {
@@ -351,6 +500,17 @@ export default function AskApp() {
       <SidebarDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)}>
         {sidebar}
       </SidebarDrawer>
+
+      <UploadDialog
+        open={uploadOpen}
+        onClose={() => setUploadOpen(false)}
+        maxMb={uploads.maxMb}
+        onUploaded={async (info) => {
+          setUploadOpen(false);
+          await refreshDatabases();
+          selectDatabase(info.id);
+        }}
+      />
 
       <CommandPalette
         open={paletteOpen}

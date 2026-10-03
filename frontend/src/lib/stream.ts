@@ -1,8 +1,9 @@
-import type { AskError, AskResponse, Provider, StreamEvent } from "@/lib/types";
+import type { AskError, AskResponse, DatabaseInfo, Provider, StreamEvent } from "@/lib/types";
 
 export interface AskOptions {
   question: string;
   provider: Provider;
+  database: string;
   context: { question: string; sql: string }[];
   onEvent: (event: StreamEvent) => void;
   signal?: AbortSignal;
@@ -13,6 +14,7 @@ export interface AskOptions {
 export async function askStream({
   question,
   provider,
+  database,
   context,
   onEvent,
   signal,
@@ -22,7 +24,7 @@ export async function askStream({
     res = await fetch("/api/ask/stream", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ question, provider, context }),
+      body: JSON.stringify({ question, provider, context, database }),
       signal,
     });
   } catch {
@@ -56,19 +58,54 @@ export async function askStream({
   throw { message: "The connection closed before an answer arrived.", attempts: [] } as AskError;
 }
 
-export async function runSql(sql: string): Promise<AskResponse> {
+export async function runSql(sql: string, database: string): Promise<AskResponse> {
   let res: Response;
   try {
     res = await fetch("/api/run", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ sql }),
+      body: JSON.stringify({ sql, database }),
     });
   } catch {
     throw { message: "Network error: could not reach the server.", attempts: [] } as AskError;
   }
   if (!res.ok) throw await errorFrom(res);
   return (await res.json()) as AskResponse;
+}
+
+/** Upload files as a new database, reporting upload progress (0-1). */
+export function uploadDatabase(
+  files: File[],
+  name: string,
+  onProgress: (fraction: number) => void,
+): Promise<DatabaseInfo> {
+  return new Promise((resolve, reject) => {
+    const form = new FormData();
+    files.forEach((f) => form.append("files", f, f.name));
+    if (name.trim()) form.append("name", name.trim());
+    // XHR rather than fetch: it reports upload progress.
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/databases");
+    xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(e.loaded / e.total);
+    xhr.onerror = () => reject({ message: "Network error during upload.", attempts: [] });
+    xhr.onload = () => {
+      let body: unknown = null;
+      try {
+        body = JSON.parse(xhr.responseText);
+      } catch {
+        // not JSON
+      }
+      if (xhr.status >= 200 && xhr.status < 300) return resolve(body as DatabaseInfo);
+      const detail = (body as { detail?: { message?: string } } | null)?.detail;
+      reject({ message: detail?.message ?? `Upload failed (${xhr.status}).`, attempts: [] });
+    };
+    xhr.send(form);
+  });
+}
+
+export async function deleteDatabase(id: string): Promise<void> {
+  const res = await fetch(`/api/databases/${encodeURIComponent(id)}`, { method: "DELETE" });
+  if (!res.ok) throw await errorFrom(res);
 }
 
 async function errorFrom(res: Response): Promise<AskError> {

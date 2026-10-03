@@ -11,7 +11,7 @@ from functools import lru_cache
 from typing import Annotated, Literal
 
 import anthropic
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -19,8 +19,10 @@ from pydantic import BaseModel, Field
 from askdb.config import get_settings
 from askdb.execute import Answer, AnswerError, Attempt
 from askdb.generate import CannotAnswerError, GenerationError, Turn
+from askdb.importers import UploadError
 from askdb.pipeline import AskDB, Provider
 from askdb.present import pick_chart, to_json_value
+from askdb.sources import SourceRegistry
 
 log = logging.getLogger("askdb.api")
 
@@ -34,11 +36,21 @@ app.add_middleware(
 
 
 @lru_cache
-def get_askdb() -> AskDB:
-    return AskDB.from_settings()
+def get_registry() -> SourceRegistry:
+    return SourceRegistry()
 
 
-DB = Annotated[AskDB, Depends(get_askdb)]
+Registry = Annotated[SourceRegistry, Depends(get_registry)]
+
+
+def resolve(registry: SourceRegistry, database: str | None) -> AskDB:
+    """The pipeline for a database id (None or "sample" = the configured database)."""
+    try:
+        return registry.get(database)
+    except KeyError:
+        raise HTTPException(
+            404, ErrorDetail(message="That database no longer exists.").model_dump()
+        ) from None
 
 
 # ---------------------------------------------------------------- models
@@ -55,10 +67,13 @@ class AskRequest(BaseModel):
     provider: Provider | None = None
     # Earlier turns of the conversation, oldest first, for follow-up questions.
     context: list[TurnIn] = Field(default_factory=list, max_length=5)
+    # Which database to ask (None = the configured sample).
+    database: str | None = None
 
 
 class RunRequest(BaseModel):
     sql: str = Field(min_length=1, max_length=5000)
+    database: str | None = None
 
 
 class AttemptOut(BaseModel):
@@ -144,7 +159,8 @@ def _context(req: AskRequest) -> list[Turn]:
 
 
 @app.get("/api/health")
-def health(db: DB) -> dict:
+def health(registry: Registry, database: str | None = Query(None)) -> dict:
+    db = resolve(registry, database)
     return {
         "status": "ok",
         "dialect": db.schema.dialect,
@@ -155,14 +171,65 @@ def health(db: DB) -> dict:
 
 
 @app.get("/api/schema")
-def schema(db: DB) -> dict:
-    return db.schema.to_dict()
+def schema(registry: Registry, database: str | None = Query(None)) -> dict:
+    db = resolve(registry, database)
+    return db.schema.to_dict() | {"suggestions": registry.suggestions(database)}
+
+
+@app.get("/api/databases")
+def list_databases(registry: Registry) -> dict:
+    s = registry.settings
+    return {
+        "databases": [info.to_dict() for info in registry.list()],
+        "allow_uploads": s.allow_uploads,
+        "max_upload_mb": s.max_upload_mb,
+    }
+
+
+@app.post("/api/databases")
+async def upload_database(
+    registry: Registry,
+    files: Annotated[list[UploadFile], File(description="One SQLite file, or CSV files")],
+    name: Annotated[str | None, Form(max_length=80)] = None,
+) -> dict:
+    """Create a queryable database from an uploaded SQLite file or CSV files."""
+    limit = registry.settings.max_upload_mb * 1024 * 1024
+    loaded: list[tuple[str, bytes]] = []
+    total = 0
+    for f in files:
+        data = await f.read(limit - total + 1)  # never read more than the limit allows
+        total += len(data)
+        if total > limit:
+            raise HTTPException(
+                413,
+                ErrorDetail(
+                    message=f"Files are larger than {registry.settings.max_upload_mb} MB."
+                ).model_dump(),
+            )
+        loaded.append((f.filename or "upload", data))
+    try:
+        info = registry.add(loaded, name)
+    except UploadError as e:
+        raise HTTPException(400, ErrorDetail(message=str(e)).model_dump()) from e
+    return info.to_dict()
+
+
+@app.delete("/api/databases/{database}")
+def delete_database(database: str, registry: Registry) -> dict:
+    try:
+        registry.delete(database)
+    except KeyError:
+        raise HTTPException(404, ErrorDetail(message="No such database.").model_dump()) from None
+    except UploadError as e:
+        raise HTTPException(400, ErrorDetail(message=str(e)).model_dump()) from e
+    return {"deleted": database}
 
 
 @app.post("/api/ask", response_model=AskResponse, responses={422: {"model": ErrorDetail}})
-def ask(req: AskRequest, db: DB) -> AskResponse:
+def ask(req: AskRequest, registry: Registry) -> AskResponse:
     # Sync endpoint: FastAPI runs it in a worker thread, so the blocking SDK
     # and DB calls don't stall the event loop.
+    db = resolve(registry, req.database)
     provider = req.provider or db.settings.provider
     try:
         ans = db.ask(req.question.strip(), provider=provider, context=_context(req))
@@ -173,9 +240,10 @@ def ask(req: AskRequest, db: DB) -> AskResponse:
 
 
 @app.post("/api/ask/stream")
-def ask_stream(req: AskRequest, db: DB) -> StreamingResponse:
+def ask_stream(req: AskRequest, registry: Registry) -> StreamingResponse:
     """Same as /api/ask, as Server-Sent Events: progress events while the pipeline
     runs, then one `result` or `error` event."""
+    db = resolve(registry, req.database)
     provider = req.provider or db.settings.provider
     events: queue.Queue[dict | None] = queue.Queue()
 
@@ -209,8 +277,9 @@ def ask_stream(req: AskRequest, db: DB) -> StreamingResponse:
 
 
 @app.post("/api/run", response_model=AskResponse, responses={422: {"model": ErrorDetail}})
-def run(req: RunRequest, db: DB) -> AskResponse:
+def run(req: RunRequest, registry: Registry) -> AskResponse:
     """Run SQL the user edited. Same read-only validation and connection."""
+    db = resolve(registry, req.database)
     try:
         ans = db.run(req.sql)
     except Exception as e:

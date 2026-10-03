@@ -11,12 +11,16 @@ export default function Sidebar({
   onClearHistory,
   onInsert,
   disabled,
+  schema,
+  schemaFailed,
 }: {
   history: string[];
   onPick: (q: string) => void;
   onClearHistory: () => void;
   onInsert: (text: string) => void;
   disabled: boolean;
+  schema: SchemaResponse | null;
+  schemaFailed: boolean;
 }) {
   return (
     <div className="flex w-full flex-col gap-4">
@@ -26,7 +30,7 @@ export default function Sidebar({
         onClear={onClearHistory}
         disabled={disabled}
       />
-      <SchemaPanel onInsert={onInsert} />
+      <SchemaPanel schema={schema} failed={schemaFailed} onInsert={onInsert} />
     </div>
   );
 }
@@ -150,17 +154,16 @@ function HistoryPanel({
   );
 }
 
-function SchemaPanel({ onInsert }: { onInsert: (text: string) => void }) {
-  const [schema, setSchema] = useState<SchemaResponse | null>(null);
-  const [failed, setFailed] = useState(false);
+function SchemaPanel({
+  schema,
+  failed,
+  onInsert,
+}: {
+  schema: SchemaResponse | null;
+  failed: boolean;
+  onInsert: (text: string) => void;
+}) {
   const [filter, setFilter] = useState("");
-
-  useEffect(() => {
-    fetch("/api/schema")
-      .then((r) => (r.ok ? r.json() : Promise.reject()))
-      .then(setSchema)
-      .catch(() => setFailed(true));
-  }, []);
 
   const tables = useMemo(() => {
     if (!schema) return [];

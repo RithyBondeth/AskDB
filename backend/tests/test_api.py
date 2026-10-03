@@ -2,13 +2,16 @@ import json
 
 from fastapi.testclient import TestClient
 
-from api.main import app, get_askdb
+from api.main import app, get_registry
 from askdb.config import Settings
-from askdb.pipeline import AskDB
+from askdb.sources import SourceRegistry
 
 
 def make_client(db_path, generator, seen_providers=None):
-    db = AskDB.from_settings(Settings(database_url=f"sqlite:///{db_path}"))
+    registry = SourceRegistry(
+        Settings(database_url=f"sqlite:///{db_path}", upload_dir=db_path.parent / "uploads")
+    )
+    db = registry.sample()
 
     def fake_generator_for(question, provider=None, context=None):  # no network in tests
         if seen_providers is not None:
@@ -17,7 +20,7 @@ def make_client(db_path, generator, seen_providers=None):
         return generator
 
     db.generator_for = fake_generator_for
-    app.dependency_overrides[get_askdb] = lambda: db
+    app.dependency_overrides[get_registry] = lambda: registry
     return TestClient(app)
 
 

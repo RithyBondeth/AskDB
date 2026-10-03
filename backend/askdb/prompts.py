@@ -20,8 +20,6 @@ or the result is an aggregate with only a few rows.
 Reply with the SQL inside a single ```sql code block, followed by one short \
 sentence explaining what the query does. If the question cannot be answered \
 from this schema, reply with CANNOT_ANSWER and one sentence explaining why.
-
-Examples:
 {examples}"""
 
 DATE_RULE = (
@@ -65,4 +63,7 @@ Fix the query so it answers the original question. Reply in the same format."""
 
 
 def render_examples(examples: list[tuple[str, str]] = FEW_SHOT_EXAMPLES) -> str:
-    return "\n\n".join(f"Q: {q}\n```sql\n{sql}\n```" for q, sql in examples)
+    if not examples:
+        return ""
+    body = "\n\n".join(f"Q: {q}\n```sql\n{sql}\n```" for q, sql in examples)
+    return f"\nExamples:\n{body}"

@@ -1,13 +1,25 @@
 "use client";
 
-import { Bot, Cpu, CornerDownLeft, History, Moon, Plus, Search, Sparkles } from "lucide-react";
+import {
+  Bot,
+  Cpu,
+  CornerDownLeft,
+  Database,
+  History,
+  Lightbulb,
+  Moon,
+  Plus,
+  Search,
+  Sparkles,
+  Upload,
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { EXAMPLES } from "@/lib/examples";
+import type { DatabaseInfo } from "@/lib/types";
 
 export interface Command {
   id: string;
-  group: "Ask" | "Actions" | "Examples" | "Recent";
+  group: "Ask" | "Actions" | "Databases" | "Suggestions" | "Recent";
   label: string;
   icon: typeof Search;
   hint?: string;
@@ -16,19 +28,40 @@ export interface Command {
 
 export function buildCommands({
   history,
+  suggestions,
+  databases,
+  currentDatabase,
   ask,
   newChat,
   setProvider,
   cycleTheme,
+  selectDatabase,
+  upload,
 }: {
   history: string[];
+  suggestions: string[];
+  databases: DatabaseInfo[];
+  currentDatabase: string;
   ask: (q: string) => void;
   newChat: () => void;
   setProvider: (p: "claude" | "local") => void;
   cycleTheme: () => void;
+  selectDatabase: (id: string) => void;
+  upload: (() => void) | null;
 }): Command[] {
   return [
     { id: "new", group: "Actions", label: "New chat", icon: Plus, run: newChat },
+    ...(upload
+      ? [
+          {
+            id: "upload",
+            group: "Actions" as const,
+            label: "Upload your data…",
+            icon: Upload,
+            run: upload,
+          },
+        ]
+      : []),
     {
       id: "claude",
       group: "Actions",
@@ -51,6 +84,15 @@ export function buildCommands({
       hint: "system → light → dark",
       run: cycleTheme,
     },
+    ...databases
+      .filter((d) => d.id !== currentDatabase)
+      .map((d) => ({
+        id: `db-${d.id}`,
+        group: "Databases" as const,
+        label: `Switch to ${d.name}`,
+        icon: Database,
+        run: () => selectDatabase(d.id),
+      })),
     ...history.map((q, i) => ({
       id: `h${i}`,
       group: "Recent" as const,
@@ -58,12 +100,12 @@ export function buildCommands({
       icon: History,
       run: () => ask(q),
     })),
-    ...EXAMPLES.map((e, i) => ({
-      id: `e${i}`,
-      group: "Examples" as const,
-      label: e.text,
-      icon: e.icon,
-      run: () => ask(e.text),
+    ...suggestions.map((q, i) => ({
+      id: `s${i}`,
+      group: "Suggestions" as const,
+      label: q,
+      icon: Lightbulb,
+      run: () => ask(q),
     })),
   ];
 }

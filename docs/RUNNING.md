@@ -176,7 +176,42 @@ ASKDB_PROVIDER=local
 
 ---
 
-## 6. Use it from the terminal (no UI)
+## 6. Use your own data
+
+Click the database name at the top left (next to the AskDB logo), then
+**Upload your data…**. You can also click **Use your own data** on the home
+screen, or press `⌘K` and choose **Upload your data…**.
+
+- **SQLite:** one `.db`, `.sqlite`, `.sqlite3`, or `.db3` file.
+- **CSV:** one or more `.csv` (or `.tsv`) files. Each file becomes a table named
+  after the file, so `orders.csv` and `customers.csv` give you `orders` and
+  `customers` tables that you can join. Column names are converted to
+  `snake_case` (`Order Date` → `order_date`). Number columns are detected
+  automatically, and empty cells become NULL.
+
+After the upload, AskDB switches to the new database, shows its schema, and
+suggests a few starter questions. Switch between databases with the same menu,
+and delete an upload with the trash icon that appears when you hover over it.
+Switching database starts a new chat.
+
+Uploads are stored in `backend/data/uploads/` (ignored by git) and survive
+restarts. They're opened read-only, so AskDB can't change them.
+
+Limits are set in `backend/.env`:
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `ASKDB_ALLOW_UPLOADS` | `true` | Set `false` to turn uploads off, for example on a public demo |
+| `ASKDB_MAX_UPLOAD_MB` | `50` | Maximum total size of one upload |
+| `ASKDB_MAX_UPLOADS` | `20` | Maximum number of stored uploads |
+| `ASKDB_UPLOAD_DIR` | `data/uploads` | Where uploads are stored |
+
+There are no user accounts. Anyone who can open your AskDB can see and query
+every upload, so don't upload sensitive data to a shared server.
+
+---
+
+## 7. Use it from the terminal (no UI)
 
 From `backend/`:
 
@@ -191,7 +226,7 @@ have to be running.
 
 ---
 
-## 7. Tests and checks
+## 8. Tests and checks
 
 **Backend** (no API key or network needed):
 
@@ -212,7 +247,7 @@ npm run build            # production build; catches type errors
 
 ---
 
-## 8. Measure accuracy (evaluation)
+## 9. Measure accuracy (evaluation)
 
 The eval runs every question in `backend/eval/dataset.jsonl` through the full
 pipeline. It counts a question as correct when the generated query returns the
@@ -243,7 +278,7 @@ Set `"ordered": true` only when row order matters, for example "top 5 ...".
 
 ---
 
-## 9. Configuration reference
+## 10. Configuration reference
 
 All settings go in `backend/.env`. Every one is optional except a model source.
 
@@ -263,6 +298,9 @@ All settings go in `backend/.env`. Every one is optional except a model source.
 | `ASKDB_STATEMENT_TIMEOUT_S` | `10` | Seconds before a query is cancelled |
 | `ASKDB_REFERENCE_DATE` | `2013-12-31` | "Today" for relative dates; set it empty for live data |
 | `ASKDB_CORS_ORIGINS` | `["http://localhost:3000"]` | Origins allowed to call the API directly |
+| `ASKDB_ALLOW_UPLOADS` | `true` | Allow uploading SQLite/CSV databases ([section 6](#6-use-your-own-data)) |
+| `ASKDB_MAX_UPLOAD_MB` | `50` | Maximum size of one upload |
+| `ASKDB_MAX_UPLOADS` | `20` | Maximum number of stored uploads |
 
 Frontend setting, in `frontend/.env.local`:
 
@@ -295,7 +333,7 @@ databases than on PostgreSQL.
 
 ---
 
-## 10. Troubleshooting
+## 11. Troubleshooting
 
 | Problem | Likely cause and fix |
 | --- | --- |
@@ -311,6 +349,10 @@ databases than on PostgreSQL.
 | `uv: command not found` | uv isn't installed, or your terminal hasn't picked it up. Install it (section 1), then open a new terminal. |
 | `Could not answer after 3 attempts` | The model couldn't write a working query. The UI shows each attempt and its error. Try rephrasing the question more specifically. |
 | `Blocked: Only SELECT queries are allowed` | Working as intended. AskDB never runs queries that change data. |
+| `This isn't a SQLite database file.` | The file has a `.db`/`.sqlite` name but isn't SQLite. Export it as SQLite, or as CSV. |
+| `Upload limit reached` | Delete an old upload from the database menu, or raise `ASKDB_MAX_UPLOADS`. |
+| `needs a header row and at least one data row` | The CSV's first line must be column names, followed by data. |
+| `That database no longer exists.` | Someone deleted the upload. Pick another database from the menu. |
 
 Still stuck? Run the backend tests (`uv run pytest`). If they pass, the backend
 code is fine and the problem is in configuration or the model connection.

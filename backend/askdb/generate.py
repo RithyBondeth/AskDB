@@ -8,7 +8,13 @@ from typing import Protocol
 
 import anthropic
 
-from askdb.prompts import DATE_RULE, REPAIR_PROMPT, SYSTEM_PROMPT, render_examples
+from askdb.prompts import (
+    DATE_RULE,
+    FEW_SHOT_EXAMPLES,
+    REPAIR_PROMPT,
+    SYSTEM_PROMPT,
+    render_examples,
+)
 
 
 class GenerationError(Exception):
@@ -44,14 +50,18 @@ class SQLGenerator(Protocol):
 
 
 def build_system_prompt(
-    dialect: str, schema_ddl: str, row_limit: int, reference_date: str | None
+    dialect: str,
+    schema_ddl: str,
+    row_limit: int,
+    reference_date: str | None,
+    examples: list[tuple[str, str]] = FEW_SHOT_EXAMPLES,
 ) -> str:
     return SYSTEM_PROMPT.format(
         dialect=dialect,
         schema_ddl=schema_ddl,
         row_limit=row_limit,
         date_rule=DATE_RULE.format(reference_date=reference_date) if reference_date else "",
-        examples=render_examples(),
+        examples=render_examples(examples),
     )
 
 

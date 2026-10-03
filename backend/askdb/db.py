@@ -38,6 +38,9 @@ def make_engine(database_url: str, timeout_s: float) -> Engine:
 
         def connect() -> sqlite3.Connection:
             conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, check_same_thread=False)
+            # Don't let functions or virtual tables named in the schema run on our behalf;
+            # matters for databases people upload (SQLite's guidance for untrusted files).
+            conn.execute("PRAGMA trusted_schema = OFF")
             _install_sqlite_timeout(conn, timeout_s)
             return conn
 

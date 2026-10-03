@@ -1,21 +1,23 @@
 import { CodeXml, Database, PanelRight, Plus, Search } from "lucide-react";
 
 import ThemeToggle from "@/components/ThemeToggle";
-import type { HealthResponse } from "@/lib/types";
+import type { ReactNode } from "react";
 
 const iconBtn =
   "grid size-9 place-items-center rounded-lg border border-border bg-surface text-muted transition hover:text-foreground";
 
 export default function Header({
-  health,
+  status,
   offline,
+  picker,
   hasThread,
   onNewChat,
   onOpenPalette,
   onOpenSchema,
 }: {
-  health: HealthResponse | null;
+  status: { dialect: string; tables: number } | null;
   offline: boolean;
+  picker: ReactNode;
   hasThread: boolean;
   onNewChat: () => void;
   onOpenPalette: () => void;
@@ -33,8 +35,10 @@ export default function Header({
           <span className="grid size-8 place-items-center rounded-lg bg-gradient-to-br from-[#6d6df0] to-[#3b82f6] text-white shadow-sm">
             <Database className="size-4" strokeWidth={2.25} />
           </span>
-          <span className="text-[15px] font-semibold tracking-tight">AskDB</span>
+          <span className="hidden text-[15px] font-semibold tracking-tight sm:inline">AskDB</span>
         </button>
+        <span className="ml-1 text-border-strong">/</span>
+        {picker}
 
         {hasThread && (
           <button
@@ -67,7 +71,7 @@ export default function Header({
           >
             <Search className="size-4" />
           </button>
-          <StatusPill health={health} offline={offline} />
+          <StatusPill status={status} offline={offline} />
           <button
             type="button"
             onClick={onOpenSchema}
@@ -93,11 +97,17 @@ export default function Header({
   );
 }
 
-function StatusPill({ health, offline }: { health: HealthResponse | null; offline: boolean }) {
+function StatusPill({
+  status,
+  offline,
+}: {
+  status: { dialect: string; tables: number } | null;
+  offline: boolean;
+}) {
   const [dot, label] = offline
     ? ["bg-danger", "Backend offline"]
-    : health
-      ? ["bg-success", `${health.dialect} · ${health.tables} tables`]
+    : status
+      ? ["bg-success", `${status.dialect} · ${status.tables} tables`]
       : ["bg-subtle animate-pulse", "Connecting…"];
   return (
     <span className="hidden items-center gap-2 rounded-full border border-border bg-surface px-3 py-1 text-xs text-muted xl:inline-flex">

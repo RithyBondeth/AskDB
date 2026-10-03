@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -13,6 +14,7 @@ from askdb.db import make_engine
 from askdb.execute import Answer, EventHandler, answer, run_sql
 from askdb.generate import ClaudeGenerator, SQLGenerator, Turn, build_system_prompt
 from askdb.local import LocalGenerator
+from askdb.prompts import FEW_SHOT_EXAMPLES
 from askdb.schema import Schema, introspect, link_tables
 
 Provider = Literal["claude", "local"]
@@ -23,13 +25,43 @@ class AskDB:
     settings: Settings
     engine: Engine
     schema: Schema
+    # Few-shot examples written for this database (none for uploads).
+    examples: list[tuple[str, str]] = field(default_factory=lambda: list(FEW_SHOT_EXAMPLES))
+    # "Today" for relative dates. None means the real current date.
+    fixed_date: str | None = None
     _client: anthropic.Anthropic | None = field(default=None, repr=False)
 
     @classmethod
     def from_settings(cls, settings: Settings | None = None) -> AskDB:
+        """The configured database (the bundled Chinook sample by default)."""
         settings = settings or get_settings()
         engine = make_engine(settings.database_url, settings.statement_timeout_s)
-        return cls(settings=settings, engine=engine, schema=introspect(engine))
+        return cls(
+            settings=settings,
+            engine=engine,
+            schema=introspect(engine),
+            fixed_date=settings.reference_date,
+        )
+
+    @classmethod
+    def for_sqlite_file(
+        cls, path: str, settings: Settings | None = None, client: anthropic.Anthropic | None = None
+    ) -> AskDB:
+        """An uploaded SQLite file: no schema-specific examples, real dates."""
+        settings = settings or get_settings()
+        engine = make_engine(f"sqlite:///{path}", settings.statement_timeout_s)
+        return cls(
+            settings=settings,
+            engine=engine,
+            schema=introspect(engine),
+            examples=[],
+            fixed_date=None,
+            _client=client,
+        )
+
+    @property
+    def reference_date(self) -> str:
+        return self.fixed_date or dt.date.today().isoformat()
 
     @property
     def client(self) -> anthropic.Anthropic:
@@ -62,7 +94,7 @@ class AskDB:
                 model=self.settings.local_model,
                 base_url=self.settings.local_base_url,
                 api=self.settings.local_api,
-                reference_date=self.settings.reference_date,
+                reference_date=self.reference_date,
                 timeout_s=self.settings.local_timeout_s,
                 context=context,
             )
@@ -70,7 +102,8 @@ class AskDB:
             dialect=self.schema.dialect,
             schema_ddl=self.schema.ddl(tables),
             row_limit=self.settings.row_limit,
-            reference_date=self.settings.reference_date,
+            reference_date=self.reference_date,
+            examples=self.examples,
         )
         return ClaudeGenerator(
             system,

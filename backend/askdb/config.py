@@ -38,6 +38,13 @@ class Settings(BaseSettings):
     reference_date: str | None = "2013-12-31"
     cors_origins: list[str] = ["http://localhost:3000"]
 
+    # Uploaded databases (SQLite files or CSVs). Turn off for public deployments:
+    # there are no user accounts, so everyone using the app sees every upload.
+    allow_uploads: bool = True
+    upload_dir: Path = BACKEND_DIR / "data" / "uploads"
+    max_upload_mb: int = 50
+    max_uploads: int = 20
+
 
 @lru_cache
 def get_settings() -> Settings:

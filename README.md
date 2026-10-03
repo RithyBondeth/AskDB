@@ -6,7 +6,7 @@ returns an error, and answers with a table and an automatically chosen chart.
 
 > Demo GIF goes here: question → answer → self-correction.
 
-**Features:** follow-up questions in a chat thread · live pipeline progress
+**Features:** upload your own data (SQLite or CSV) · follow-up questions in a chat thread · live pipeline progress
 (streamed) · self-correction you can inspect · edit and re-run the SQL ·
 sortable, filterable results with bar/line charts and CSV export · ⌘K command
 palette · share links (`?q=`) · light and dark themes.
@@ -127,10 +127,13 @@ cd frontend && npm run lint && npm run build
 
 | Method | Path | Description |
 | --- | --- | --- |
-| `POST` | `/api/ask` | `{"question": "...", "provider": "claude" \| "local", "context": [{"question", "sql"}]}` → SQL, explanation, columns, rows, chart spec, every attempt, and the model that answered. `provider` and `context` (up to 5 earlier turns, for follow-ups) are optional |
+| `POST` | `/api/ask` | `{"question": "...", "provider": "claude" \| "local", "context": [{"question", "sql"}]}` → SQL, explanation, columns, rows, chart spec, every attempt, and the model that answered. `provider`, `context` (up to 5 earlier turns, for follow-ups), and `database` (an upload's id; default is the sample) are optional. `/api/run` also takes `database` |
 | `POST` | `/api/ask/stream` | Same request as `/api/ask`, answered as Server-Sent Events: `stage`, `generated`, `attempt_failed` while it runs, then `result` or `error` |
 | `POST` | `/api/run` | `{"sql": "..."}` → runs SQL you edited, behind the same read-only validation |
-| `GET` | `/api/schema` | Tables and columns, with primary keys |
+| `GET` | `/api/schema?database=` | Tables, columns (with primary keys), and suggested questions |
+| `GET` | `/api/databases` | The sample plus uploaded databases, and the upload limits |
+| `POST` | `/api/databases` | Multipart `files` (one SQLite file, or CSVs) and optional `name` → a new database |
+| `DELETE` | `/api/databases/{id}` | Delete an upload |
 | `GET` | `/api/health` | Status, dialect, table count, and available models |
 
 When every attempt fails, `/api/ask` returns 422 with the failed attempts, so the
@@ -176,6 +179,16 @@ self-correction go into the question instead of a chat history. The validator,
 read-only connection, and retry loop are shared with Claude, so both models get
 the same safety guarantees.
 
+**Uploads are untrusted.** A SQLite upload must start with the SQLite file
+header and pass `PRAGMA quick_check`. CSVs are parsed into a new database that
+AskDB creates itself, with column types inferred and names converted to
+`snake_case`. Every SQLite connection sets `trusted_schema = OFF`, so functions
+named in a malicious schema don't run, and is opened read-only. Size and count
+limits apply. Database ids are checked against a strict pattern, so they can't
+be used to reach other files. Uploads get no Chinook few-shot examples, and
+"today" is the real date. There are no user accounts, so every user of a
+server sees every upload: set `ASKDB_ALLOW_UPLOADS=false` on a public demo.
+
 **Follow-ups.** The UI sends the last three answered questions and their SQL
 as `context`. Claude sees them as earlier conversation turns. The open model is
 single-turn, so they go into its prompt as "earlier in this conversation".
@@ -217,9 +230,9 @@ results files to track accuracy across prompt and model changes. The dataset has
 ```
 backend/
   askdb/           pipeline: schema, prompts, generate (Claude), local (open model),
-                   validate, execute, present
+                   validate, execute, present; sources + importers (uploads)
   api/main.py      FastAPI app
-  data/            chinook.sqlite (bundled sample, opened read-only)
+  data/            chinook.sqlite (bundled sample) and uploads/ (git-ignored)
   eval/            dataset.jsonl, run_eval.py, compare.py
   tests/           pytest suite (no network needed)
 frontend/
@@ -233,5 +246,6 @@ frontend/
 - [x] Week 2: read-only validation, timeouts, self-correction loop, tests
 - [x] Week 3: web UI with table and automatic chart, few-shot prompt
 - [x] Open model: Arctic-Text2SQL-R1-7B via Ollama, switchable per question
+- [x] Upload your own data: SQLite files or CSVs
 - [ ] Week 4: grow the eval set, record Claude vs. open-model accuracy, demo GIF, deploy
 - [ ] Stretch: embedding-based schema linking, point it at your own data

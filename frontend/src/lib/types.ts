@@ -49,6 +49,22 @@ export interface SchemaTable {
 export interface SchemaResponse {
   dialect: string;
   tables: SchemaTable[];
+  suggestions: string[];
+}
+
+export interface DatabaseInfo {
+  id: string;
+  name: string;
+  kind: "sample" | "sqlite" | "csv";
+  tables: number;
+  size_bytes: number;
+  created_at: string;
+}
+
+export interface DatabasesResponse {
+  databases: DatabaseInfo[];
+  allow_uploads: boolean;
+  max_upload_mb: number;
 }
 
 export interface HealthResponse {
@@ -86,6 +102,7 @@ export interface Turn {
   id: string;
   question: string;
   provider: Provider;
+  database: string;
   status: "running" | "done" | "error";
   progress: Progress;
   startedAt: number;

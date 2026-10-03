@@ -21,6 +21,7 @@ export default function Composer({
   models,
   busy,
   followUpTo,
+  example,
 }: {
   inputRef: RefObject<HTMLTextAreaElement | null>;
   value: string;
@@ -32,6 +33,7 @@ export default function Composer({
   models: Record<Provider, string> | null;
   busy: boolean;
   followUpTo: string | null;
+  example?: string;
 }) {
   // Grow with content, up to a few lines.
   useEffect(() => {
@@ -71,7 +73,7 @@ export default function Composer({
         placeholder={
           followUpTo
             ? "Ask a follow-up… e.g. only for 2012"
-            : "Ask anything about your data… e.g. Which genres sell the most tracks?"
+            : `Ask anything about your data…${example ? ` e.g. ${example}` : ""}`
         }
         className="block w-full resize-none bg-transparent px-3 pt-2.5 pb-1 text-base leading-relaxed outline-none placeholder:text-subtle"
       />

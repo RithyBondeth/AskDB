@@ -25,7 +25,9 @@ CORS setup is needed.
 | `src/components/Composer.tsx` | Question box, model switch, stop button |
 | `src/components/CommandPalette.tsx` | ⌘K palette: ask, actions, recent, examples |
 | `src/components/Sidebar.tsx` | Recent questions and schema browser (click to insert), plus the mobile drawer |
-| `src/components/Header.tsx` | Top bar: new chat, ⌘K, status, theme |
+| `src/components/Header.tsx` | Top bar: database picker, new chat, ⌘K, status, theme |
+| `src/components/DatabasePicker.tsx` | Switch between the sample and uploaded databases; delete uploads |
+| `src/components/UploadDialog.tsx` | Drag-and-drop upload of SQLite or CSV files, with progress |
 | `src/lib/stream.ts` | Client for the streaming and run-SQL endpoints |
 | `src/lib/` (other) | Types, theme, examples, formatting, CSV, SQL highlighting, backend proxy |
 | `src/app/api/*/route.ts` | Proxy to the Python API (the stream route passes events through unbuffered) |
