@@ -26,8 +26,8 @@ _THINK = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 
 MISSING_KEY = (
     "No API key for the free model. Get a free Gemini key at "
-    "https://aistudio.google.com/apikey and set ASKDB_FREE_API_KEY in backend/.env, "
-    "then restart the backend."
+    "https://aistudio.google.com/apikey and add it under API keys (the key button "
+    "at the top of the page), or set ASKDB_FREE_API_KEY on the server."
 )
 
 

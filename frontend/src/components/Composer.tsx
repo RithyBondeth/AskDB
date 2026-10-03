@@ -10,9 +10,9 @@ const PROVIDERS: { id: Provider; label: string; icon: typeof Bot; setup: string 
     id: "free",
     label: "Free",
     icon: Gift,
-    setup: "Free Gemini key: aistudio.google.com/apikey → ASKDB_FREE_API_KEY in backend/.env",
+    setup: "Add a free Gemini key under API keys",
   },
-  { id: "claude", label: "Claude", icon: Bot, setup: "Set ANTHROPIC_API_KEY in backend/.env" },
+  { id: "claude", label: "Claude", icon: Bot, setup: "Add an Anthropic key under API keys" },
   { id: "local", label: "Open model", icon: Cpu, setup: "Runs on your machine with Ollama" },
 ];
 

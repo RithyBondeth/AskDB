@@ -1,6 +1,8 @@
 // Server-only helper: the browser talks to Next.js route handlers, which
 // forward to the Python API. This keeps the backend URL private and avoids CORS.
 
+import { KEY_HEADER } from "@/lib/keys";
+
 const BACKEND_URL = process.env.ASKDB_API_URL ?? "http://127.0.0.1:8000";
 
 export async function forward(path: string, init?: RequestInit): Promise<Response> {
@@ -22,4 +24,10 @@ export async function forward(path: string, init?: RequestInit): Promise<Respons
       { status: 503 },
     );
   }
+}
+
+/** Headers for the backend, plus the user's own model key if the browser sent one. */
+export function withUserKey(request: Request, headers: Record<string, string>) {
+  const key = request.headers.get(KEY_HEADER);
+  return key ? { ...headers, [KEY_HEADER]: key } : headers;
 }

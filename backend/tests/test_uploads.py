@@ -109,7 +109,9 @@ def test_upload_csvs_then_query(client, registry):
 def test_ask_uses_the_chosen_database(client, registry, scripted):
     info = upload(client, ("sales.csv", SALES_CSV)).json()
     db = registry.get(info["id"])
-    db.generator_for = lambda q, provider=None, context=None: scripted("SELECT COUNT(*) FROM sales")
+    db.generator_for = lambda q, provider=None, context=None, api_key=None: scripted(
+        "SELECT COUNT(*) FROM sales"
+    )
     res = client.post("/api/ask", json={"question": "how many", "database": info["id"]})
     assert res.status_code == 200
     assert res.json()["rows"] == [[3]]
@@ -192,7 +194,7 @@ def test_uploaded_db_prompt_has_no_chinook_examples_and_real_date(registry):
 
     info = registry.add([("sales.csv", SALES_CSV)])
     db = registry.get(info.id)
-    gen = db.generator_for("total amount", provider="claude")
+    gen = db.generator_for("total amount", provider="claude", api_key="k")
     assert "Artist" not in gen.system_prompt
     assert "Examples:" not in gen.system_prompt
     assert dt.date.today().isoformat() in gen.system_prompt

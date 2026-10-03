@@ -1,14 +1,14 @@
 import { KeyRound, Terminal } from "lucide-react";
 
 import Doodle from "@/components/Doodle";
-import type { HealthResponse, Provider } from "@/lib/types";
+import type { Provider } from "@/lib/types";
 
-const KEY_STEPS: Record<Provider, { title: string; steps: React.ReactNode[] }> = {
+const KEY_HELP: Partial<Record<Provider, { title: string; body: React.ReactNode }>> = {
   free: {
     title: "Add a free model key to start",
-    steps: [
+    body: (
       <>
-        Get a free Gemini key at{" "}
+        Get a free Google Gemini key at{" "}
         <a
           href="https://aistudio.google.com/apikey"
           target="_blank"
@@ -17,18 +17,13 @@ const KEY_STEPS: Record<Provider, { title: string; steps: React.ReactNode[] }> =
         >
           aistudio.google.com/apikey
         </a>{" "}
-        (no credit card).
-      </>,
-      <>
-        Add <code className="font-mono text-[13px]">ASKDB_FREE_API_KEY=…</code> to{" "}
-        <code className="font-mono text-[13px]">backend/.env</code>.
-      </>,
-      <>Restart the backend.</>,
-    ],
+        (no credit card), then paste it here. It stays in your browser.
+      </>
+    ),
   },
   claude: {
     title: "Add your Anthropic key to use Claude",
-    steps: [
+    body: (
       <>
         Create a key at{" "}
         <a
@@ -38,28 +33,24 @@ const KEY_STEPS: Record<Provider, { title: string; steps: React.ReactNode[] }> =
           className="font-semibold text-accent-ink underline underline-offset-2"
         >
           platform.claude.com
-        </a>
-        .
-      </>,
-      <>
-        Add <code className="font-mono text-[13px]">ANTHROPIC_API_KEY=…</code> to{" "}
-        <code className="font-mono text-[13px]">backend/.env</code>.
-      </>,
-      <>Restart the backend, or switch to the Free model below.</>,
-    ],
+        </a>{" "}
+        and paste it here, or switch to the Free model below.
+      </>
+    ),
   },
-  local: { title: "", steps: [] },
 };
 
 /** First-run help on the home screen: the backend is down, or the chosen model has no key. */
 export default function SetupNotice({
   offline,
-  health,
+  configured,
   provider,
+  onAddKey,
 }: {
   offline: boolean;
-  health: HealthResponse | null;
+  configured: Record<Provider, boolean> | null;
   provider: Provider;
+  onAddKey: () => void;
 }) {
   if (offline) {
     return (
@@ -71,16 +62,19 @@ export default function SetupNotice({
       </Notice>
     );
   }
-  if (!health || health.configured?.[provider] !== false) return null;
-  const { title, steps } = KEY_STEPS[provider];
-  if (!steps.length) return null;
+  const help = KEY_HELP[provider];
+  if (!help || configured?.[provider] !== false) return null;
   return (
-    <Notice icon={KeyRound} title={title}>
-      <ol className="list-decimal space-y-1 pl-5">
-        {steps.map((s, i) => (
-          <li key={i}>{s}</li>
-        ))}
-      </ol>
+    <Notice icon={KeyRound} title={help.title}>
+      <p>{help.body}</p>
+      <button
+        type="button"
+        onClick={onAddKey}
+        className="btn-ink mt-3 inline-flex items-center gap-2 px-4 py-2 text-sm font-medium"
+      >
+        <KeyRound className="size-4" strokeWidth={2.5} />
+        Add API key
+      </button>
     </Notice>
   );
 }

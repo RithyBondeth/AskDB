@@ -11,7 +11,8 @@ from functools import lru_cache
 from typing import Annotated, Literal
 
 import anthropic
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
+import httpx
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -19,6 +20,7 @@ from pydantic import BaseModel, Field
 from askdb.config import get_settings
 from askdb.execute import Answer, AnswerError, Attempt
 from askdb.generate import CannotAnswerError, GenerationError, Turn
+from askdb.hosted import list_models
 from askdb.importers import UploadError
 from askdb.pipeline import AskDB, Provider
 from askdb.present import pick_chart, to_json_value
@@ -41,6 +43,14 @@ def get_registry() -> SourceRegistry:
 
 
 Registry = Annotated[SourceRegistry, Depends(get_registry)]
+
+# The user's own key for the chosen provider, kept in their browser and sent with
+# each request. It's used for that request only: never stored or logged.
+UserKey = Annotated[str | None, Header(alias="X-AskDB-Api-Key", max_length=512)]
+
+
+def _key(value: str | None) -> str | None:
+    return value.strip() or None if value else None
 
 
 def resolve(registry: SourceRegistry, database: str | None) -> AskDB:
@@ -140,13 +150,18 @@ def error_detail(e: Exception) -> tuple[int, ErrorDetail]:
     if isinstance(e, GenerationError):
         return 502, ErrorDetail(message=str(e))
     if isinstance(e, anthropic.AuthenticationError):
-        return 500, ErrorDetail(message="Anthropic API key is missing or invalid.")
+        return 401, ErrorDetail(
+            message="The Anthropic API rejected the key. Check it under API keys."
+        )
     if isinstance(e, anthropic.RateLimitError):
         return 429, ErrorDetail(message="Rate limited by the model API; try again.")
     if isinstance(e, anthropic.APIError):
         return 502, ErrorDetail(message=f"Model API error: {e.message}")
     if isinstance(e, anthropic.AnthropicError):  # e.g. no credentials configured
-        return 500, ErrorDetail(message=str(e))
+        return 401, ErrorDetail(
+            message="No Anthropic key. Add yours under API keys (the key button at the "
+            "top of the page), or switch to the Free model."
+        )
     log.exception("Unexpected error", exc_info=e)
     return 500, ErrorDetail(message="Unexpected server error. Check the backend logs.")
 
@@ -227,13 +242,15 @@ def delete_database(database: str, registry: Registry) -> dict:
 
 
 @app.post("/api/ask", response_model=AskResponse, responses={422: {"model": ErrorDetail}})
-def ask(req: AskRequest, registry: Registry) -> AskResponse:
+def ask(req: AskRequest, registry: Registry, api_key: UserKey = None) -> AskResponse:
     # Sync endpoint: FastAPI runs it in a worker thread, so the blocking SDK
     # and DB calls don't stall the event loop.
     db = resolve(registry, req.database)
     provider = req.provider or db.default_provider
     try:
-        ans = db.ask(req.question.strip(), provider=provider, context=_context(req))
+        ans = db.ask(
+            req.question.strip(), provider=provider, context=_context(req), api_key=_key(api_key)
+        )
     except Exception as e:
         status, detail = error_detail(e)
         raise HTTPException(status, detail.model_dump()) from e
@@ -241,7 +258,7 @@ def ask(req: AskRequest, registry: Registry) -> AskResponse:
 
 
 @app.post("/api/ask/stream")
-def ask_stream(req: AskRequest, registry: Registry) -> StreamingResponse:
+def ask_stream(req: AskRequest, registry: Registry, api_key: UserKey = None) -> StreamingResponse:
     """Same as /api/ask, as Server-Sent Events: progress events while the pipeline
     runs, then one `result` or `error` event."""
     db = resolve(registry, req.database)
@@ -255,6 +272,7 @@ def ask_stream(req: AskRequest, registry: Registry) -> StreamingResponse:
                 provider=provider,
                 context=_context(req),
                 on_event=events.put,
+                api_key=_key(api_key),
             )
             result = to_response(ans, provider, db.model_name(provider))
             events.put({"type": "result", "data": result.model_dump()})
@@ -287,3 +305,30 @@ def run(req: RunRequest, registry: Registry) -> AskResponse:
         status, detail = error_detail(e)
         raise HTTPException(status, detail.model_dump()) from e
     return to_response(ans, "manual", "Edited by you")
+
+
+class KeyCheckRequest(BaseModel):
+    provider: Literal["claude", "free"]
+
+
+@app.post("/api/keys/check")
+def check_key(req: KeyCheckRequest, api_key: UserKey = None) -> dict:
+    """Try a key with a cheap call that lists models (no tokens are used)."""
+    key = _key(api_key)
+    if not key:
+        return {"ok": False, "message": "Paste a key first."}
+    settings = get_settings()
+    try:
+        if req.provider == "free":
+            list_models(settings.free_base_url, key, httpx.Client(timeout=15))
+        else:
+            anthropic.Anthropic(api_key=key, max_retries=0, timeout=15).models.list(limit=1)
+    except httpx.HTTPStatusError as e:
+        code = e.response.status_code
+        bad = code in (400, 401, 403)
+        return {"ok": False, "message": "That key was rejected." if bad else f"HTTP {code}."}
+    except anthropic.AuthenticationError:
+        return {"ok": False, "message": "That key was rejected."}
+    except (httpx.HTTPError, anthropic.APIError) as e:
+        return {"ok": False, "message": f"Couldn't reach the provider: {type(e).__name__}."}
+    return {"ok": True, "message": "Key works."}

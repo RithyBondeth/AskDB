@@ -76,12 +76,13 @@ question
 Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/), Node 20+, and a
 free [Gemini API key](https://aistudio.google.com/apikey) (no credit card).
 An [Anthropic API key](https://platform.claude.com/) is optional, for Claude.
+You paste the key into the app (key button in the top bar), not into a config file.
 
 **Backend** (port 8000):
 
 ```bash
 cd backend
-cp .env.example .env          # add ASKDB_FREE_API_KEY (and ANTHROPIC_API_KEY for Claude)
+cp .env.example .env          # optional: server-side keys; users can add their own in the app
 uv sync
 uv run uvicorn api.main:app --reload --port 8000
 ```
@@ -138,7 +139,12 @@ cd frontend && npm run lint && npm run build
 | `GET` | `/api/databases` | The sample plus uploaded databases, and the upload limits |
 | `POST` | `/api/databases` | Multipart `files` (one SQLite file, or CSVs) and optional `name` → a new database |
 | `DELETE` | `/api/databases/{id}` | Delete an upload |
-| `GET` | `/api/health` | Status, dialect, table count, and available models |
+| `POST` | `/api/keys/check` | `{"provider": "free" \| "claude"}` with the key in `X-AskDB-Api-Key` → whether it works (lists models; no tokens used) |
+| `GET` | `/api/health` | Status, dialect, table count, available models, and which have a server key |
+
+`/api/ask` and `/api/ask/stream` accept the user's own key for the chosen
+provider in the `X-AskDB-Api-Key` header; it overrides the server key for that
+request.
 
 When every attempt fails, `/api/ask` returns 422 with the failed attempts, so the
 UI can show what was tried.
@@ -153,6 +159,12 @@ anything containing writes, DDL, `PRAGMA`, `ATTACH`, `SELECT INTO`, or
 `mode=ro`, Postgres `default_transaction_read_only`), so a statement the parser
 misses still can't change data. `tests/test_validate.py` and
 `tests/test_execute.py` check both layers.
+
+**Bring your own key.** Users paste a model key in the app instead of editing
+server files. It's kept in their browser's localStorage and sent as a header
+with each question; the backend uses it for that one request and never stores
+or logs it, so a public deployment doesn't spend the host's quota. A server key
+in `.env` is an optional fallback.
 
 **Self-correction.** Database errors (unknown column, bad join) *and*
 validation failures (syntax errors, blocked statements) are sent back to the

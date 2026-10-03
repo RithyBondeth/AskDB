@@ -13,11 +13,22 @@ from sqlalchemy import Engine
 from askdb.config import Settings, get_settings
 from askdb.db import make_engine
 from askdb.execute import Answer, EventHandler, answer, run_sql
-from askdb.generate import ClaudeGenerator, SQLGenerator, Turn, build_system_prompt
+from askdb.generate import (
+    ClaudeGenerator,
+    GenerationError,
+    SQLGenerator,
+    Turn,
+    build_system_prompt,
+)
 from askdb.hosted import HostedGenerator
 from askdb.local import LocalGenerator
 from askdb.prompts import FEW_SHOT_EXAMPLES
 from askdb.schema import Schema, introspect, link_tables
+
+MISSING_ANTHROPIC_KEY = (
+    "No Anthropic key. Add yours under API keys (the key button at the top of the page), "
+    "set ANTHROPIC_API_KEY on the server, or switch to the Free model."
+)
 
 Provider = Literal["claude", "free", "local"]
 
@@ -112,7 +123,10 @@ class AskDB:
         question: str,
         provider: Provider | None = None,
         context: list[Turn] | None = None,
+        api_key: str | None = None,
     ) -> SQLGenerator:
+        """The generator for a provider. `api_key` is the user's own key for that
+        provider (from the browser); it takes precedence over the server's key."""
         provider = provider or self.default_provider
         # Link on the whole conversation so follow-ups keep the tables they build on.
         linking_text = " ".join([*(t.question for t in context or []), question])
@@ -141,15 +155,17 @@ class AskDB:
                 system,
                 model=self.settings.free_model,
                 base_url=self.settings.free_base_url,
-                api_key=key.get_secret_value() if key else None,
+                api_key=api_key or (key.get_secret_value() if key else None),
                 context=context,
                 timeout_s=self.settings.free_timeout_s,
             )
+        if not api_key and not self.has_anthropic_credentials:
+            raise GenerationError(MISSING_ANTHROPIC_KEY)
         return ClaudeGenerator(
             system,
             model=self.settings.model,
             effort=self.settings.effort,
-            client=self.client,
+            client=anthropic.Anthropic(api_key=api_key) if api_key else self.client,
             context=context,
         )
 
@@ -160,10 +176,11 @@ class AskDB:
         provider: Provider | None = None,
         context: list[Turn] | None = None,
         on_event: EventHandler | None = None,
+        api_key: str | None = None,
     ) -> Answer:
         return answer(
             question,
-            generator or self.generator_for(question, provider, context),
+            generator or self.generator_for(question, provider, context, api_key),
             self.engine,
             self.schema.dialect,
             max_retries=self.settings.max_retries,

@@ -1,21 +1,25 @@
 import json
 
+import httpx
 from fastapi.testclient import TestClient
 
+import api.main
 from api.main import app, get_registry
 from askdb.config import Settings
 from askdb.sources import SourceRegistry
 
 
-def make_client(db_path, generator, seen_providers=None):
+def make_client(db_path, generator, seen_providers=None, seen_keys=None):
     registry = SourceRegistry(
         Settings(database_url=f"sqlite:///{db_path}", upload_dir=db_path.parent / "uploads")
     )
     db = registry.sample()
 
-    def fake_generator_for(question, provider=None, context=None):  # no network in tests
+    def fake_generator_for(question, provider=None, context=None, api_key=None):  # no network
         if seen_providers is not None:
             seen_providers.append(provider)
+        if seen_keys is not None:
+            seen_keys.append(api_key)
         generator.context = context
         return generator
 
@@ -142,3 +146,33 @@ def test_run_still_blocks_writes(db_path, scripted):
     # and nothing was deleted
     rows = client.post("/api/run", json={"sql": "SELECT COUNT(*) FROM customer"}).json()["rows"]
     assert rows == [[3]]
+
+
+def test_users_key_header_reaches_the_generator(db_path, scripted):
+    keys: list = []
+    client = make_client(db_path, scripted("SELECT 1 AS one", "SELECT 1 AS one"), seen_keys=keys)
+    headers = {"X-AskDB-Api-Key": "  my-key  "}
+    assert client.post("/api/ask", json={"question": "one"}, headers=headers).status_code == 200
+    client.post("/api/ask/stream", json={"question": "one"}, headers=headers)
+    client.post("/api/ask", json={"question": "one"})
+    assert keys == ["my-key", "my-key", None]
+
+
+def test_key_check(db_path, scripted, monkeypatch):
+    client = make_client(db_path, scripted("SELECT 1"))
+    check = lambda key: client.post(  # noqa: E731
+        "/api/keys/check", json={"provider": "free"}, headers={"X-AskDB-Api-Key": key}
+    ).json()
+    assert check("")["ok"] is False
+
+    seen = []
+    monkeypatch.setattr(api.main, "list_models", lambda url, key, c: seen.append(key) or ["m"])
+    assert check("good") == {"ok": True, "message": "Key works."}
+    assert seen == ["good"]
+
+    def rejected(url, key, c):
+        req = httpx.Request("GET", url)
+        raise httpx.HTTPStatusError("bad", request=req, response=httpx.Response(400, request=req))
+
+    monkeypatch.setattr(api.main, "list_models", rejected)
+    assert check("bad") == {"ok": False, "message": "That key was rejected."}

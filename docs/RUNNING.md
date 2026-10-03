@@ -68,15 +68,24 @@ cp .env.example .env        # Windows: copy .env.example .env
 uv sync                     # creates .venv and installs dependencies
 ```
 
-Open `backend/.env` in an editor and paste your free Gemini key:
+You don't have to put a key in `.env`. Once the app is running, click
+**Add API key** on the home screen (or the key button in the top bar) and paste
+your free Gemini key from [aistudio.google.com/apikey](https://aistudio.google.com/apikey).
+**Test** checks it without using any quota. The key is saved only in your
+browser and sent with each question; the backend uses it for that request and
+never stores or logs it. Each person who opens the app adds their own key. An
+Anthropic key for Claude goes in the same dialog.
+
+**Optional: a server key.** If you'd rather everyone (or just you) use one key
+without typing it, put it in `backend/.env` and restart the backend:
 
 ```
 ASKDB_FREE_API_KEY=AIza...
+ANTHROPIC_API_KEY=sk-ant-...   # only for Claude
 ```
 
-That's all you need. To also use Claude, add `ANTHROPIC_API_KEY=sk-ant-...` and
-pick **Claude** in the UI (or set `ASKDB_PROVIDER=claude` to make it the
-default).
+A key a user adds in the browser always takes precedence over the server's. Be
+careful with a server key on a public deployment: every visitor spends it.
 
 **Using a different free service.** Any OpenAI-compatible chat API works. Set
 the base URL and model as well as the key, then restart the backend:
@@ -302,13 +311,14 @@ Set `"ordered": true` only when row order matters, for example "top 5 ...".
 
 ## 10. Configuration reference
 
-All settings go in `backend/.env`. Every one is optional except a model source.
+All settings go in `backend/.env`. Every one is optional. Users can add their own
+model keys in the app instead of the two key variables.
 
 | Variable | Default | What it does |
 | --- | --- | --- |
-| `ANTHROPIC_API_KEY` | none | Key for Claude |
+| `ANTHROPIC_API_KEY` | none | Server key for Claude (users can add their own in the app instead) |
 | `ASKDB_PROVIDER` | `free` | Default model: `free`, `claude`, `local`, or `auto` (Claude when `ANTHROPIC_API_KEY` is set, otherwise free) |
-| `ASKDB_FREE_API_KEY` | none | Key for the free model (free Gemini key from aistudio.google.com/apikey) |
+| `ASKDB_FREE_API_KEY` | none | Server key for the free model (users can add their own in the app instead) |
 | `ASKDB_FREE_BASE_URL` | Gemini's OpenAI-compatible URL | Any OpenAI-compatible chat API |
 | `ASKDB_FREE_MODEL` | `gemini-flash-latest` | Model name at that API (`uv run askdb --list-models`) |
 | `ASKDB_FREE_TIMEOUT_S` | `120` | Seconds to wait for the free model |
@@ -363,12 +373,12 @@ databases than on PostgreSQL.
 
 | Problem | Likely cause and fix |
 | --- | --- |
-| `No API key for the free model` | `ASKDB_FREE_API_KEY` is missing from `backend/.env`, or you started the backend before saving it. Get a free key at aistudio.google.com/apikey, then restart the backend. |
-| `The free model API rejected the key` | The key is wrong or was deleted. Create a new one and paste it again. |
+| `No API key for the free model` | No key in the browser and none on the server. Click the key button in the top bar and paste a free key from aistudio.google.com/apikey. |
+| `The free model API rejected the key` | The key is wrong or was deleted. Create a new one and paste it in the API keys dialog. |
 | `Model "…" not found` | That model name isn't available to your key. Run `uv run askdb --list-models` and set `ASKDB_FREE_MODEL` to one of them. |
 | `Free-tier rate limit reached` | Free tiers allow only a few requests per minute. Wait a minute and try again. |
-| `No Anthropic credentials found` | You picked Claude, but `ANTHROPIC_API_KEY` is missing from `backend/.env`. Add it and restart the backend, or switch back to **Free**. |
-| `Anthropic API key is missing or invalid` | The key is wrong or revoked. Create a new one. |
+| `No Anthropic key` | You picked Claude but haven't added an Anthropic key. Add one in the API keys dialog, or switch back to **Free**. |
+| `The Anthropic API rejected the key` | The key is wrong or revoked. Create a new one. |
 | `Cannot reach the AskDB API at http://127.0.0.1:8000` | The backend isn't running. Start it in terminal 1. |
 | Schema sidebar says "Backend unreachable" | Same as above. |
 | `Cannot reach the open model server` | Ollama isn't running. Start the Ollama app, or run `ollama serve`. |

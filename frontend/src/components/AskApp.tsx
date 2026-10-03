@@ -9,10 +9,12 @@ import DatabasePicker from "@/components/DatabasePicker";
 import Doodle from "@/components/Doodle";
 import Examples from "@/components/Examples";
 import Header from "@/components/Header";
+import KeysDialog from "@/components/KeysDialog";
 import SetupNotice from "@/components/SetupNotice";
 import Sidebar, { SidebarDrawer } from "@/components/Sidebar";
 import TurnView from "@/components/TurnView";
 import UploadDialog from "@/components/UploadDialog";
+import { type ApiKeys, keyFor, loadKeys, saveKeys } from "@/lib/keys";
 import { askStream, deleteDatabase, runSql } from "@/lib/stream";
 import { getTheme, nextTheme, setTheme } from "@/lib/theme";
 import type {
@@ -76,6 +78,8 @@ export default function AskApp() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [keysOpen, setKeysOpen] = useState(false);
+  const [keys, setKeys] = useState<ApiKeys>({});
   const [databases, setDatabases] = useState<DatabaseInfo[]>([]);
   const [uploads, setUploads] = useState({ allowed: false, maxMb: 50 });
   const [database, setDatabase] = useState<string>(SAMPLE);
@@ -87,13 +91,23 @@ export default function AskApp() {
   const endRef = useRef<HTMLDivElement>(null);
   // Latest values for callbacks that outlive a render (stream handlers, shortcuts).
   const providerRef = useRef(provider);
+  const keysRef = useRef(keys);
   const turnsRef = useRef(turns);
   const databaseRef = useRef(database);
   useEffect(() => {
     providerRef.current = provider;
+    keysRef.current = keys;
     turnsRef.current = turns;
     databaseRef.current = database;
-  }, [provider, turns, database]);
+  }, [provider, turns, database, keys]);
+
+  // A provider is ready if the server has a key for it or the user added their own.
+  const configured = useMemo(() => {
+    if (!health?.configured) return null;
+    const c = { ...health.configured };
+    for (const p of ["free", "claude"] as const) c[p] = c[p] || Boolean(keys[p]);
+    return c;
+  }, [health, keys]);
 
   const busy = turns.some((t) => t.status === "running");
   const lastDone = [...turns].reverse().find((t) => t.status === "done");
@@ -163,6 +177,7 @@ export default function AskApp() {
           provider: turn.provider,
           database: turn.database,
           context,
+          apiKey: keyFor(keysRef.current, turn.provider),
           onEvent,
           signal: controller.signal,
         });
@@ -253,6 +268,10 @@ export default function AskApp() {
     const shared = params.get("q");
     const initialDb = params.get("db") ?? loadDatabase();
     (async () => {
+      // Keys live in localStorage, so they're read here rather than during render.
+      const saved = loadKeys();
+      setKeys(saved);
+      keysRef.current = saved;
       const list = await refreshDatabases();
       if (list.some((d) => d.id === initialDb)) selectDatabase(initialDb);
       try {
@@ -318,6 +337,7 @@ export default function AskApp() {
         cycleTheme: () => setTheme(nextTheme(getTheme())),
         selectDatabase,
         upload: uploads.allowed ? () => setUploadOpen(true) : null,
+        openKeys: () => setKeysOpen(true),
       }),
     [history, schema, databases, database, ask, newChat, selectDatabase, uploads.allowed],
   );
@@ -362,7 +382,7 @@ export default function AskApp() {
       provider={provider}
       onProviderChange={setProvider}
       models={health?.providers ?? null}
-      configured={health?.configured ?? null}
+      configured={configured}
       busy={busy}
       followUpTo={lastDone?.question ?? null}
       example={schema?.suggestions[0]}
@@ -387,6 +407,8 @@ export default function AskApp() {
         hasThread={turns.length > 0}
         onNewChat={newChat}
         onOpenPalette={() => setPaletteOpen(true)}
+        onOpenKeys={() => setKeysOpen(true)}
+        needsKey={configured?.[provider] === false}
         onOpenSchema={() => setDrawerOpen(true)}
       />
 
@@ -417,7 +439,12 @@ export default function AskApp() {
                 />
               </div>
               <div className="mx-auto flex w-full max-w-4xl flex-col gap-4">
-                <SetupNotice offline={offline} health={health} provider={provider} />
+                <SetupNotice
+                  offline={offline}
+                  configured={configured}
+                  provider={provider}
+                  onAddKey={() => setKeysOpen(true)}
+                />
                 {composer}
               </div>
               <div className="mx-auto flex w-full max-w-4xl flex-col gap-4">
@@ -544,6 +571,18 @@ export default function AskApp() {
           setUploadOpen(false);
           await refreshDatabases();
           selectDatabase(info.id);
+        }}
+      />
+
+      <KeysDialog
+        open={keysOpen}
+        onClose={() => setKeysOpen(false)}
+        keys={keys}
+        serverKeys={health?.configured ?? {}}
+        onSave={(next) => {
+          setKeys(next);
+          saveKeys(next);
+          setKeysOpen(false);
         }}
       />
 

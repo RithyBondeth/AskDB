@@ -1,3 +1,4 @@
+import { KEY_HEADER } from "@/lib/keys";
 import type { AskError, AskResponse, DatabaseInfo, Provider, StreamEvent } from "@/lib/types";
 
 export interface AskOptions {
@@ -5,6 +6,8 @@ export interface AskOptions {
   provider: Provider;
   database: string;
   context: { question: string; sql: string }[];
+  /** The user's own key for `provider`, if they added one. */
+  apiKey?: string;
   onEvent: (event: StreamEvent) => void;
   signal?: AbortSignal;
 }
@@ -16,6 +19,7 @@ export async function askStream({
   provider,
   database,
   context,
+  apiKey,
   onEvent,
   signal,
 }: AskOptions): Promise<AskResponse> {
@@ -23,7 +27,7 @@ export async function askStream({
   try {
     res = await fetch("/api/ask/stream", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...(apiKey ? { [KEY_HEADER]: apiKey } : {}) },
       body: JSON.stringify({ question, provider, context, database }),
       signal,
     });
@@ -123,4 +127,22 @@ async function errorFrom(res: Response): Promise<AskError> {
     // not JSON
   }
   return { message: `Request failed (${res.status}).`, attempts: [] };
+}
+
+/** Try a key without spending tokens (the backend lists the provider's models). */
+export async function checkKey(
+  provider: "free" | "claude",
+  key: string,
+): Promise<{ ok: boolean; message: string }> {
+  try {
+    const res = await fetch("/api/keys/check", {
+      method: "POST",
+      headers: { "content-type": "application/json", [KEY_HEADER]: key },
+      body: JSON.stringify({ provider }),
+    });
+    if (!res.ok) return { ok: false, message: (await errorFrom(res)).message };
+    return (await res.json()) as { ok: boolean; message: string };
+  } catch {
+    return { ok: false, message: "Network error: could not reach the server." };
+  }
 }

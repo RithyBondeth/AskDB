@@ -2,11 +2,12 @@
 
 import {
   Bot,
-  Cpu,
   CornerDownLeft,
+  Cpu,
   Database,
   Gift,
   History,
+  KeyRound,
   Lightbulb,
   Moon,
   Plus,
@@ -38,6 +39,7 @@ export function buildCommands({
   cycleTheme,
   selectDatabase,
   upload,
+  openKeys,
 }: {
   history: string[];
   suggestions: string[];
@@ -49,6 +51,7 @@ export function buildCommands({
   cycleTheme: () => void;
   selectDatabase: (id: string) => void;
   upload: (() => void) | null;
+  openKeys: () => void;
 }): Command[] {
   return [
     { id: "new", group: "Actions", label: "New chat", icon: Plus, run: newChat },
@@ -63,6 +66,7 @@ export function buildCommands({
           },
         ]
       : []),
+    { id: "keys", group: "Actions", label: "API keys…", icon: KeyRound, run: openKeys },
     {
       id: "claude",
       group: "Actions",

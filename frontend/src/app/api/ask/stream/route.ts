@@ -1,3 +1,5 @@
+import { withUserKey } from "@/lib/backend";
+
 const BACKEND_URL = process.env.ASKDB_API_URL ?? "http://127.0.0.1:8000";
 
 // Generation plus up to two self-correction rounds can take a while.
@@ -8,7 +10,7 @@ export async function POST(request: Request) {
   try {
     const res = await fetch(`${BACKEND_URL}/api/ask/stream`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: withUserKey(request, { "content-type": "application/json" }),
       body: await request.text(),
       cache: "no-store",
     });

@@ -162,3 +162,20 @@ def test_free_generator_gets_the_full_prompt(db_path):
     assert gen.model == "some-model" and gen.api_key == "k"
     assert "CREATE TABLE customer" in gen.system_prompt
     assert db.model_name("free") == "some-model"
+
+
+def test_users_own_key_wins_over_the_servers(db_path):
+    db = AskDB.from_settings(settings(db_path, free_api_key="server"))
+    assert db.generator_for("q", provider="free", api_key="mine").api_key == "mine"
+    assert db.generator_for("q", provider="free").api_key == "server"
+    no_server_key = AskDB.from_settings(settings(db_path))
+    assert no_server_key.generator_for("q", provider="free", api_key="mine").api_key == "mine"
+
+
+def test_claude_without_any_key_explains_what_to_do(db_path, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    db = AskDB.from_settings(settings(db_path))
+    with pytest.raises(GenerationError, match="API keys"):
+        db.generator_for("q", provider="claude")
+    assert db.generator_for("q", provider="claude", api_key="mine") is not None

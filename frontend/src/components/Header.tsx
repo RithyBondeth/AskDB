@@ -1,4 +1,4 @@
-import { CodeXml, Database, PanelRight, Plus, Search } from "lucide-react";
+import { CodeXml, Database, KeyRound, PanelRight, Plus, Search } from "lucide-react";
 import type { ReactNode } from "react";
 
 import ThemeToggle from "@/components/ThemeToggle";
@@ -12,6 +12,8 @@ export default function Header({
   hasThread,
   onNewChat,
   onOpenPalette,
+  onOpenKeys,
+  needsKey,
   onOpenSchema,
 }: {
   status: { dialect: string; tables: number } | null;
@@ -20,6 +22,8 @@ export default function Header({
   hasThread: boolean;
   onNewChat: () => void;
   onOpenPalette: () => void;
+  onOpenKeys: () => void;
+  needsKey: boolean;
   onOpenSchema: () => void;
 }) {
   return (
@@ -73,6 +77,18 @@ export default function Header({
             <Search className="size-4" />
           </button>
           <StatusPill status={status} offline={offline} />
+          <button
+            type="button"
+            onClick={onOpenKeys}
+            aria-label={needsKey ? "API keys (add a key to start)" : "API keys"}
+            title="API keys"
+            className={`${iconBtn} relative`}
+          >
+            <KeyRound className="size-4" />
+            {needsKey && (
+              <span className="absolute -top-1 -right-1 size-3 animate-pulse rounded-full border-2 border-ink bg-accent" />
+            )}
+          </button>
           <button
             type="button"
             onClick={onOpenSchema}
