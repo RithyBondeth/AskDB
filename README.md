@@ -62,6 +62,9 @@ question
 
 ## Run it locally
 
+> The full guide, covering configuration, the open model, your own database,
+> and troubleshooting, is in **[docs/RUNNING.md](docs/RUNNING.md)**. Quick version:
+
 Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/), Node 20+, and an
 [Anthropic API key](https://platform.claude.com/).
 
