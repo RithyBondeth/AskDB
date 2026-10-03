@@ -63,14 +63,14 @@ export default function LivePipeline({ turn }: { turn: Turn }) {
           return (
             <li key={id} className="flex items-center">
               <span
-                className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 transition-colors duration-300 ${
+                className={`inline-flex items-center gap-1.5 rounded-[10px_14px_9px_15px/14px_9px_15px_10px] border-[1.5px] px-2.5 py-1 transition-colors duration-300 ${
                   state === "active"
-                    ? "border-accent/50 bg-accent-soft text-accent-ink"
+                    ? "border-ink bg-highlight text-[#1d1b19]"
                     : state === "done"
-                      ? "border-border bg-surface text-foreground"
+                      ? "border-ink bg-surface text-foreground"
                       : state === "failed"
-                        ? "border-danger/40 bg-danger-soft text-danger"
-                        : "border-dashed border-border text-subtle"
+                        ? "border-danger bg-danger-soft text-danger"
+                        : "border-dashed border-border-strong text-subtle"
                 }`}
               >
                 {state === "active" ? (
@@ -87,8 +87,10 @@ export default function LivePipeline({ turn }: { turn: Turn }) {
               </span>
               {i < STAGES.length - 1 && (
                 <span
-                  className={`mx-1 h-px w-4 transition-colors duration-300 ${
-                    stateOf(STAGES[i + 1].id) === "pending" ? "bg-border" : "bg-success/60"
+                  className={`mx-1 w-4 border-t-2 transition-colors duration-300 ${
+                    stateOf(STAGES[i + 1].id) === "pending"
+                      ? "border-dashed border-border-strong"
+                      : "border-ink"
                   }`}
                 />
               )}

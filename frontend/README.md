@@ -28,6 +28,8 @@ CORS setup is needed.
 | `src/components/Header.tsx` | Top bar: database picker, new chat, ⌘K, status, theme |
 | `src/components/DatabasePicker.tsx` | Switch between the sample and uploaded databases; delete uploads |
 | `src/components/UploadDialog.tsx` | Drag-and-drop upload of SQLite or CSV files, with progress |
+| `src/components/Doodle.tsx` | Renders an Open Doodles illustration in the theme's ink and accent colors |
+| `src/lib/doodles.ts` | The illustrations used (Open Doodles, CC0), as minified SVG paths |
 | `src/lib/stream.ts` | Client for the streaming and run-SQL endpoints |
 | `src/lib/` (other) | Types, theme, examples, formatting, CSV, SQL highlighting, backend proxy |
 | `src/app/api/*/route.ts` | Proxy to the Python API (the stream route passes events through unbuffered) |
@@ -35,6 +37,11 @@ CORS setup is needed.
 **Keyboard:** `↵` ask · `⇧↵` new line · `⌘K` / `Ctrl+K` command palette · `/`
 focus the question box · `⌘↵` run edited SQL.
 
-Light, dark, and system themes are supported (toggle in the header). Chart
-colors come from a colorblind-validated categorical palette, defined as CSS
-variables in `src/app/globals.css`.
+**Design.** A hand-drawn "doodle" look: dotted paper with ink outlines, uneven
+corners, hard offset shadows, sticky notes, and a highlighter in light mode, and
+chalk on a blackboard in dark mode. Headings use Caveat, the interface uses
+Shantell Sans, and SQL uses Geist Mono. The building blocks (`.card`, `.sketch`,
+`.btn-ink`, `.btn-paper`, `.note`, `.hl`, `.squiggle`) and all colors are in
+`src/app/globals.css`. Illustrations from [Open Doodles](https://www.opendoodles.com)
+(Pablo Stanley, CC0) mark the empty, thinking, error, no-rows, and upload states.
+Chart colors are a colorblind-validated categorical palette for each theme.

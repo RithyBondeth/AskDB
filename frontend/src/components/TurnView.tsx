@@ -14,6 +14,7 @@ import {
 import { useEffect, useState } from "react";
 
 import AttemptsView from "@/components/AttemptsView";
+import Doodle from "@/components/Doodle";
 import LivePipeline from "@/components/LivePipeline";
 import ResultPanel from "@/components/ResultPanel";
 import { FOLLOW_UPS } from "@/lib/examples";
@@ -51,18 +52,20 @@ export default function TurnView({
     >
       {/* Question */}
       <div className="flex justify-end gap-2.5">
-        <p className="max-w-[85%] rounded-2xl rounded-tr-md bg-accent px-4 py-2.5 text-[15px] text-on-accent shadow-sm">
+        <p className="sketch relative max-w-[85%] bg-note-yellow px-4 py-2.5 text-[16px] shadow-[3px_3px_0_var(--ink)]">
           {turn.question}
+          {/* speech-bubble tail */}
+          <span className="absolute -right-[9px] top-3 size-4 rotate-45 border-t-2 border-r-2 border-ink bg-note-yellow" />
         </p>
-        <span className="hidden size-8 shrink-0 place-items-center rounded-full bg-surface-2 text-muted sm:grid">
-          <User className="size-4" />
+        <span className="sketch hidden size-9 shrink-0 place-items-center bg-surface sm:grid">
+          <User className="size-4" strokeWidth={2.25} />
         </span>
       </div>
 
       {/* Answer */}
       <div className="flex gap-2.5">
-        <span className="hidden size-8 shrink-0 place-items-center rounded-full bg-gradient-to-br from-[#6d6df0] to-[#3b82f6] text-white shadow-sm sm:grid">
-          <Sparkles className="size-4" />
+        <span className="sketch hidden size-9 shrink-0 -rotate-6 place-items-center bg-accent text-on-accent sm:grid">
+          <Sparkles className="size-4" strokeWidth={2.25} />
         </span>
         <div className="card min-w-0 flex-1 p-4 sm:p-5">
           <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-muted">
@@ -89,12 +92,23 @@ export default function TurnView({
           <LivePipeline turn={turn} />
 
           {status === "running" && (
-            <div className="mt-4 flex flex-col gap-3" aria-live="polite">
-              <div className="skeleton h-4 w-2/3" />
-              <div className="flex h-40 items-end gap-2.5">
-                {[70, 45, 85, 30, 60, 50, 75, 40].map((h, i) => (
-                  <div key={i} className="skeleton flex-1" style={{ height: `${h}%` }} />
-                ))}
+            <div
+              className="mt-4 flex flex-col items-center gap-1 py-2 sm:flex-row sm:gap-6"
+              aria-live="polite"
+            >
+              <Doodle name="meditating" className="animate-float w-44 shrink-0 sm:w-52" />
+              <div className="text-center sm:text-left">
+                <p className="font-hand text-3xl font-bold">
+                  Thinking
+                  <span className="typing-dot">.</span>
+                  <span className="typing-dot [animation-delay:0.15s]">.</span>
+                  <span className="typing-dot [animation-delay:0.3s]">.</span>
+                </p>
+                <p className="mt-1 max-w-xs text-sm text-muted">
+                  {turn.provider === "local"
+                    ? "The open model reasons step by step. On a laptop this can take a minute."
+                    : "Writing SQL, checking it’s read-only, and running it."}
+                </p>
               </div>
             </div>
           )}
@@ -112,7 +126,7 @@ export default function TurnView({
                 onRevert={onRevert}
               />
               {corrected && (
-                <details className="group rounded-xl border border-border bg-surface-2/50 px-4 py-3">
+                <details className="group sketch-sm bg-note-mint/60 px-4 py-3">
                   <summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-medium select-none">
                     <ChevronRight className="size-4 text-muted transition group-open:rotate-90" />
                     Self-corrected after {data.attempts.length - 1} failed{" "}
@@ -129,15 +143,18 @@ export default function TurnView({
 
           {status === "error" && error && (
             <div className="mt-4 flex flex-col gap-3">
-              <div className="flex items-start gap-3 rounded-xl border border-danger/30 bg-danger-soft p-3.5">
-                <TriangleAlert className="mt-0.5 size-4 shrink-0 text-danger" />
-                <div className="min-w-0 text-sm">
-                  <p className="font-medium text-danger">Couldn’t answer this</p>
-                  <p className="mt-0.5 break-words text-muted">{error.message}</p>
+              <div className="flex flex-col items-center gap-2 sm:flex-row sm:gap-5">
+                <Doodle name="clumsy" className="animate-wiggle w-40 shrink-0" />
+                <div className="sketch-sm min-w-0 flex-1 bg-danger-soft p-3.5 text-sm">
+                  <p className="flex items-center gap-1.5 font-hand text-2xl leading-none font-bold text-danger">
+                    <TriangleAlert className="size-4.5" strokeWidth={2.5} />
+                    Oops, couldn’t answer that
+                  </p>
+                  <p className="mt-1.5 break-words text-foreground/80">{error.message}</p>
                 </div>
               </div>
               {error.attempts.length > 0 && (
-                <details className="group rounded-xl border border-border px-4 py-3" open>
+                <details className="group sketch-sm px-4 py-3" open>
                   <summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-medium select-none">
                     <ChevronRight className="size-4 text-muted transition group-open:rotate-90" />
                     What was tried
@@ -162,7 +179,7 @@ export default function TurnView({
               type="button"
               disabled={busy}
               onClick={() => onFollowUp(q)}
-              className="rounded-full border border-border bg-surface px-3 py-1 text-xs text-muted transition hover:border-accent/50 hover:text-foreground disabled:opacity-50"
+              className="btn-paper px-3 py-1 text-sm disabled:opacity-50"
             >
               {q}
             </button>
@@ -186,7 +203,7 @@ function useElapsed(turn: Turn): number {
 
 function Meta({ icon: Icon, children }: { icon: typeof Clock; children: React.ReactNode }) {
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-surface-2 px-2 py-0.5 tabular-nums">
+    <span className="sketch-sm inline-flex items-center gap-1 bg-surface-2 px-2 py-0.5 tabular-nums">
       <Icon className="size-3" />
       {children}
     </span>

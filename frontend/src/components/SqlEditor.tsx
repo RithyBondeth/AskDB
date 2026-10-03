@@ -48,7 +48,7 @@ export default function SqlEditor({
     "inline-flex items-center gap-1.5 rounded-md px-2 py-1 transition hover:bg-surface-2 hover:text-foreground disabled:opacity-50";
 
   return (
-    <div className="overflow-hidden rounded-xl border border-border bg-code">
+    <div className="sketch-sm overflow-hidden bg-code">
       <div className="flex items-center gap-1 border-b border-border px-3 py-1.5 text-xs text-muted">
         <span className="mr-auto font-medium">
           {editing ? "Editing SQL" : "SQL"}
@@ -67,7 +67,7 @@ export default function SqlEditor({
               type="button"
               onClick={run}
               disabled={running}
-              className="inline-flex items-center gap-1.5 rounded-md bg-accent px-2.5 py-1 font-medium text-on-accent transition hover:bg-accent-hover disabled:opacity-60"
+              className="btn-ink inline-flex items-center gap-1.5 px-2.5 py-0.5 font-medium"
             >
               {running ? (
                 <Loader2 className="size-3.5 animate-spin" />

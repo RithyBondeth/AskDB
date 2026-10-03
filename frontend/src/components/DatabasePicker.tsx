@@ -54,7 +54,7 @@ export default function DatabasePicker({
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="listbox"
         aria-expanded={open}
-        className="inline-flex h-8 max-w-[14rem] items-center gap-2 rounded-lg border border-border bg-surface px-2.5 text-sm transition hover:border-border-strong"
+        className="btn-paper inline-flex h-8 max-w-[6.5rem] sm:h-9 items-center gap-1.5 px-2 text-sm sm:max-w-[14rem] sm:gap-2 sm:px-2.5"
       >
         <Icon className="size-4 shrink-0 text-accent" />
         <span className="truncate">{current?.name ?? "Loading…"}</span>

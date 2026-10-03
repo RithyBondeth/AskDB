@@ -62,7 +62,7 @@ question
 | DB access | SQLAlchemy |
 | SQL parsing | sqlglot |
 | API | FastAPI |
-| UI | Next.js (App Router) + Tailwind + Recharts |
+| UI | Next.js (App Router) + Tailwind + Recharts, with a hand-drawn "doodle" design and [Open Doodles](https://www.opendoodles.com) illustrations |
 | Eval | Execution accuracy on question → gold-SQL pairs |
 
 ## Run it locally
@@ -239,6 +239,14 @@ frontend/
   src/app/         page + API route handlers (proxy to the backend)
   src/components/  question box, attempts, table, chart, schema panel
 ```
+
+## Credits
+
+Illustrations are from [Open Doodles](https://www.opendoodles.com) by
+[Pablo Stanley](https://twitter.com/pablostanley), released under
+[CC0](https://creativecommons.org/publicdomain/zero/1.0/). The SVGs were taken
+from [react-open-doodles](https://github.com/lunahq/react-open-doodles) (MIT),
+minified, and recolored to match the theme (`frontend/src/lib/doodles.ts`).
 
 ## Roadmap
 

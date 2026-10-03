@@ -45,22 +45,28 @@ export default function ResultChart({
     return s.length > 14 ? `${s.slice(0, 13)}…` : s;
   };
   const axis = {
-    stroke: "var(--border-strong)",
-    tick: { fill: "var(--muted)", fontSize: 12 },
+    stroke: "var(--ink)",
+    tick: { fill: "var(--muted)", fontSize: 12, fontFamily: "var(--font-shantell)" },
     tickLine: false,
   };
   const tooltip = {
     contentStyle: {
       background: "var(--surface)",
-      border: "1px solid var(--border)",
-      borderRadius: 10,
-      boxShadow: "0 8px 24px -12px rgb(0 0 0 / 0.25)",
+      border: "2px solid var(--ink)",
+      borderRadius: "10px 14px 9px 15px / 14px 9px 15px 10px",
+      boxShadow: "3px 3px 0 var(--ink)",
       color: "var(--foreground)",
       fontSize: 13,
     },
     labelStyle: { color: "var(--foreground)", fontWeight: 600, marginBottom: 4 },
     itemStyle: { color: "var(--muted)" },
     formatter: (v: unknown) => formatCell(v as Cell),
+  };
+  // Legend text stays in the text color; the colored dot carries series identity.
+  const legend = {
+    iconType: "circle" as const,
+    wrapperStyle: { fontSize: 12 },
+    formatter: (value: string) => <span style={{ color: "var(--muted)" }}>{value}</span>,
   };
   const xAxis = (
     <XAxis
@@ -86,7 +92,7 @@ export default function ResultChart({
             {xAxis}
             {yAxis}
             <Tooltip {...tooltip} cursor={{ stroke: "var(--border-strong)" }} />
-            {series.length > 1 && <Legend iconType="circle" wrapperStyle={{ fontSize: 12 }} />}
+            {series.length > 1 && <Legend {...legend} />}
             {series.map((s, i) => (
               <Line
                 key={s}
@@ -105,7 +111,7 @@ export default function ResultChart({
             {xAxis}
             {yAxis}
             <Tooltip {...tooltip} cursor={{ fill: "var(--surface-2)" }} />
-            {series.length > 1 && <Legend iconType="circle" wrapperStyle={{ fontSize: 12 }} />}
+            {series.length > 1 && <Legend {...legend} />}
             {series.map((s, i) => (
               <Bar
                 key={s}

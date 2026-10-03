@@ -30,8 +30,8 @@ export default function ResultPanel({
   const activeTab: Tab = tab === "chart" && !hasChart ? "table" : tab;
 
   return (
-    <div className="overflow-hidden rounded-xl border border-border">
-      <div className="flex flex-wrap items-center gap-1 border-b border-border bg-surface px-1.5 py-1.5">
+    <div className="sketch overflow-hidden">
+      <div className="flex flex-wrap items-center gap-1 border-b-2 border-ink bg-surface-2 px-1.5 py-1.5">
         {hasChart && !single && (
           <TabButton
             active={activeTab === "chart"}
@@ -51,7 +51,7 @@ export default function ResultPanel({
         <div className="ml-auto flex items-center gap-1">
           {activeTab === "chart" && hasChart && (
             <div
-              className="inline-flex rounded-md bg-surface-2 p-0.5"
+              className="sketch-sm inline-flex bg-surface p-0.5"
               role="group"
               aria-label="Chart type"
             >
@@ -65,7 +65,7 @@ export default function ResultPanel({
                     aria-pressed={on}
                     title={`${t} chart`}
                     onClick={() => setChartType(t)}
-                    className={`grid size-7 place-items-center rounded transition ${on ? "bg-surface text-foreground shadow-sm" : "text-muted hover:text-foreground"}`}
+                    className={`grid size-7 place-items-center rounded-md transition ${on ? "bg-highlight text-[#1d1b19]" : "text-muted hover:text-foreground"}`}
                   >
                     <Icon className="size-3.5" />
                   </button>
@@ -81,7 +81,7 @@ export default function ResultPanel({
                 onChange={(e) => setFilter(e.target.value)}
                 placeholder="Filter rows"
                 aria-label="Filter rows"
-                className="w-32 rounded-md border border-border bg-surface-2 py-1 pr-2 pl-7 text-xs outline-none placeholder:text-subtle focus:border-accent/60 sm:w-40"
+                className="sketch-sm w-32 bg-surface py-1 pr-2 pl-7 text-xs outline-none placeholder:text-subtle focus:shadow-[2px_2px_0_var(--ink)] sm:w-40"
               />
             </label>
           )}
@@ -152,8 +152,10 @@ function TabButton({
       type="button"
       onClick={onClick}
       aria-pressed={active}
-      className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition ${
-        active ? "bg-surface-2 font-medium text-foreground" : "text-muted hover:text-foreground"
+      className={`inline-flex items-center gap-1.5 rounded-[9px_12px_8px_13px/12px_8px_13px_9px] border-[1.5px] px-3 py-1 text-sm transition ${
+        active
+          ? "border-ink bg-surface font-medium text-foreground shadow-[2px_2px_0_var(--ink)]"
+          : "border-transparent text-muted hover:text-foreground"
       }`}
     >
       <Icon className="size-4" />

@@ -33,7 +33,7 @@ export default function AttemptsView({ attempts }: { attempts: Attempt[] }) {
               tone={failed ? "failed" : "success"}
             />
             {failed && (
-              <div className="mt-2 rounded-lg bg-danger-soft px-3 py-2 text-xs">
+              <div className="sketch-sm mt-2 border-danger bg-danger-soft px-3 py-2 text-xs">
                 <p className="font-mono text-danger">{a.error}</p>
                 {i < attempts.length - 1 && (
                   <p className="mt-1 flex items-center gap-1 text-muted">

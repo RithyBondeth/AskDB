@@ -3,6 +3,7 @@
 import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import Doodle from "@/components/Doodle";
 import { formatCell, isNumericColumn } from "@/lib/format";
 import type { Cell } from "@/lib/types";
 
@@ -51,9 +52,11 @@ export default function ResultTable({
 
   if (rows.length === 0) {
     return (
-      <p className="px-4 py-10 text-center text-sm text-muted">
-        The query ran but returned no rows.
-      </p>
+      <div className="flex flex-col items-center gap-1 px-4 py-6 text-center">
+        <Doodle name="float" className="w-44" />
+        <p className="font-hand text-2xl font-bold">Nothing here</p>
+        <p className="text-sm text-muted">The query ran but returned no rows.</p>
+      </div>
     );
   }
 

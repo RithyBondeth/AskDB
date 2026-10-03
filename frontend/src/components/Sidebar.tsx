@@ -3,6 +3,7 @@
 import { ChevronRight, Database, History, KeyRound, Plus, Search, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
+import Doodle from "@/components/Doodle";
 import type { SchemaResponse } from "@/lib/types";
 
 export default function Sidebar({
@@ -93,8 +94,8 @@ function PanelTitle({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="mb-2 flex items-center gap-2 text-sm font-medium">
-      <Icon className="size-4 text-muted" />
+    <div className="mb-2 flex items-center gap-2 font-hand text-2xl leading-none font-bold">
+      <Icon className="size-4.5" strokeWidth={2.25} />
       {children}
       <span className="ml-auto">{action}</span>
     </div>
@@ -132,7 +133,10 @@ function HistoryPanel({
         Recent
       </PanelTitle>
       {history.length === 0 ? (
-        <p className="text-xs text-subtle">Questions you ask appear here.</p>
+        <div className="flex items-center gap-2">
+          <Doodle name="laying" className="w-24 shrink-0" />
+          <p className="text-xs text-subtle">Questions you ask appear here.</p>
+        </div>
       ) : (
         <ul className="-mx-1 flex flex-col">
           {history.map((q) => (
@@ -211,7 +215,7 @@ function SchemaPanel({
               onChange={(e) => setFilter(e.target.value)}
               placeholder="Filter tables or columns"
               aria-label="Filter tables or columns"
-              className="w-full rounded-lg border border-border bg-surface-2 py-1.5 pr-2 pl-8 text-sm outline-none placeholder:text-subtle focus:border-accent/60"
+              className="sketch-sm w-full bg-surface py-1.5 pr-2 pl-8 text-sm outline-none placeholder:text-subtle focus:shadow-[2px_2px_0_var(--ink)]"
             />
           </label>
           <ul className="-mx-1 flex max-h-[50vh] flex-col overflow-auto">

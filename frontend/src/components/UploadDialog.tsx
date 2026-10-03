@@ -3,6 +3,7 @@
 import { FileSpreadsheet, FileUp, Loader2, Database, ShieldCheck, X } from "lucide-react";
 import { useRef, useState } from "react";
 
+import Doodle from "@/components/Doodle";
 import { uploadDatabase } from "@/lib/stream";
 import type { AskError, DatabaseInfo } from "@/lib/types";
 
@@ -89,7 +90,7 @@ export default function UploadDialog({
       <div className="card animate-pop-in relative w-full max-w-lg p-5 shadow-2xl">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold tracking-tight">Upload your data</h2>
+            <h2 className="font-hand text-4xl leading-none font-bold">Upload your data</h2>
             <p className="mt-1 text-sm text-muted">
               A SQLite database, or one or more CSV files. Each CSV becomes a table you can join.
             </p>
@@ -104,6 +105,7 @@ export default function UploadDialog({
           </button>
         </div>
 
+        <Doodle name="unboxing" className="mx-auto -mb-2 mt-2 w-40" />
         <button
           type="button"
           onClick={() => inputRef.current?.click()}
@@ -118,16 +120,16 @@ export default function UploadDialog({
             add(e.dataTransfer.files);
           }}
           disabled={busy}
-          className={`mt-4 flex w-full flex-col items-center gap-2 rounded-xl border-2 border-dashed px-4 py-8 text-center transition ${
+          className={`mt-2 flex w-full flex-col items-center gap-1.5 rounded-[16px_20px_14px_22px/20px_14px_22px_16px] border-2 border-dashed px-4 py-6 text-center transition ${
             dragging
               ? "border-accent bg-accent-soft"
-              : "border-border-strong hover:border-accent/60 hover:bg-surface-2"
+              : "border-ink bg-surface-2 hover:bg-note-yellow"
           }`}
         >
-          <span className="grid size-11 place-items-center rounded-full bg-accent-soft text-accent-ink">
-            <FileUp className="size-5" />
+          <FileUp className="size-6" strokeWidth={2.25} />
+          <span className="font-hand text-2xl leading-none font-bold">
+            Drop files here or click to browse
           </span>
-          <span className="text-sm font-medium">Drop files here or click to browse</span>
           <span className="text-xs text-subtle">
             .db · .sqlite · .sqlite3 · .csv · .tsv — up to {maxMb} MB
           </span>
@@ -180,7 +182,7 @@ export default function UploadDialog({
             onChange={(e) => setName(e.target.value)}
             maxLength={80}
             placeholder={files[0]?.name.replace(/\.[^.]+$/, "") ?? "My data"}
-            className="mt-1 w-full rounded-lg border border-border bg-surface-2 px-3 py-2 outline-none placeholder:text-subtle focus:border-accent/60"
+            className="sketch-sm mt-1 w-full bg-surface px-3 py-2 outline-none placeholder:text-subtle focus:shadow-[2px_2px_0_var(--ink)]"
           />
         </label>
 
@@ -208,7 +210,7 @@ export default function UploadDialog({
             type="button"
             onClick={submit}
             disabled={!files.length || tooBig || busy}
-            className="ml-auto inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-on-accent transition hover:bg-accent-hover disabled:opacity-50"
+            className="btn-ink ml-auto inline-flex items-center gap-2 px-4 py-2 text-sm font-medium"
           >
             {busy && <Loader2 className="size-4 animate-spin" />}
             {busy

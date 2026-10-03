@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CommandPalette, { buildCommands } from "@/components/CommandPalette";
 import Composer from "@/components/Composer";
 import DatabasePicker from "@/components/DatabasePicker";
+import Doodle from "@/components/Doodle";
 import Examples from "@/components/Examples";
 import Header from "@/components/Header";
 import Sidebar, { SidebarDrawer } from "@/components/Sidebar";
@@ -367,7 +368,7 @@ export default function AskApp() {
   );
 
   return (
-    <div className="page-backdrop flex min-h-screen flex-col">
+    <div className="page-backdrop flex min-h-screen flex-col overflow-x-clip">
       <Header
         status={schema ? { dialect: schema.dialect, tables: schema.tables.length } : null}
         offline={offline}
@@ -390,34 +391,47 @@ export default function AskApp() {
       <div className="mx-auto flex w-full max-w-7xl flex-1 gap-8 px-4">
         <main className="flex min-w-0 flex-1 flex-col">
           {turns.length === 0 ? (
-            <div className="flex flex-1 flex-col justify-center gap-6 py-12">
-              <div className="animate-fade-up text-center">
-                <span className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1 text-xs text-muted">
-                  <span className="size-1.5 rounded-full bg-accent" />
-                  Validated, read-only, self-correcting SQL
-                </span>
-                <h1 className="text-gradient mt-5 text-4xl font-semibold tracking-tight sm:text-6xl">
-                  Ask your data anything.
-                </h1>
-                <p className="mx-auto mt-4 max-w-xl text-base text-muted">
-                  Type a question in plain English. AskDB writes the SQL, checks it can’t change
-                  anything, runs it, and fixes its own mistakes. Then keep the conversation going.
-                </p>
+            <div className="flex flex-1 flex-col justify-center gap-8 py-10">
+              <div className="animate-fade-up mx-auto grid w-full max-w-4xl items-center gap-6 md:grid-cols-[1.25fr_1fr]">
+                <div className="text-center md:text-left">
+                  <span className="sketch-sm inline-flex -rotate-1 items-center gap-2 bg-surface px-3 py-1 text-xs text-muted">
+                    <ShieldCheck className="size-3.5 text-accent" strokeWidth={2.5} />
+                    Validated · read-only · self-correcting SQL
+                  </span>
+                  <h1 className="mt-4 font-hand text-6xl leading-[0.95] font-bold sm:text-7xl">
+                    Ask your data <span className="hl">anything.</span>
+                  </h1>
+                  <p className="mx-auto mt-4 max-w-md text-[17px] leading-relaxed text-muted md:mx-0">
+                    Type a question in plain English. AskDB writes the SQL, checks it{" "}
+                    <span className="squiggle text-accent">
+                      <span className="text-foreground">can’t change anything</span>
+                    </span>
+                    , runs it, and fixes its own mistakes.
+                  </p>
+                </div>
+                <Doodle
+                  name="sittingReading"
+                  className="mx-auto w-full max-w-[19rem] md:max-w-none"
+                />
               </div>
-              <div className="mx-auto w-full max-w-3xl">{composer}</div>
-              <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
+              <div className="mx-auto w-full max-w-4xl">{composer}</div>
+              <div className="mx-auto flex w-full max-w-4xl flex-col gap-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-xs font-medium tracking-wide text-subtle uppercase">
+                  <p className="font-hand text-2xl leading-none font-bold">
                     Try asking{" "}
-                    {current ? <span className="normal-case">· {current.name}</span> : null}
+                    {current ? (
+                      <span className="font-sans text-sm font-normal text-muted">
+                        about {current.name}
+                      </span>
+                    ) : null}
                   </p>
                   {uploads.allowed && (
                     <button
                       type="button"
                       onClick={() => setUploadOpen(true)}
-                      className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-accent/50 px-3 py-1 text-xs text-accent-ink transition hover:bg-accent-soft"
+                      className="btn-paper inline-flex items-center gap-1.5 px-3 py-1.5 text-sm"
                     >
-                      <Upload className="size-3.5" />
+                      <Upload className="size-4" strokeWidth={2.25} />
                       Use your own data
                     </button>
                   )}
@@ -425,13 +439,25 @@ export default function AskApp() {
                 {schema ? (
                   <Examples items={schema.suggestions} onPick={ask} disabled={busy} />
                 ) : (
-                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                     {[0, 1, 2].map((i) => (
-                      <div key={i} className="skeleton h-14 rounded-xl" />
+                      <div key={i} className="skeleton h-16" />
                     ))}
                   </div>
                 )}
               </div>
+              <p className="text-center text-xs text-subtle">
+                Illustrations by{" "}
+                <a
+                  href="https://www.opendoodles.com"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="underline decoration-dotted underline-offset-2 hover:text-foreground"
+                >
+                  Open Doodles
+                </a>{" "}
+                (Pablo Stanley, CC0)
+              </p>
             </div>
           ) : (
             <>

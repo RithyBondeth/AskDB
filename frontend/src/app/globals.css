@@ -1,101 +1,129 @@
 @import "tailwindcss";
 
-/* Light theme (default) */
+/*
+ * Doodle design system: warm paper and ink in light mode, chalk on a blackboard
+ * in dark mode. Illustrations are from Open Doodles (CC0) and recolor through
+ * --ink / --accent.
+ */
+
+/* Light theme: paper */
 :root {
   color-scheme: light;
-  --background: #f6f6f8;
-  --surface: #ffffff;
-  --surface-2: #f2f2f5;
-  --foreground: #16161d;
-  --muted: #6a6a78;
-  --subtle: #9a9aa8;
-  --border: #e6e6ec;
-  --border-strong: #d4d4dd;
-  --accent: #5b5bd6;
-  --accent-hover: #4b4bc4;
-  --accent-soft: #ededfc;
-  --accent-ink: #3f3fb0;
+  --background: #fbf6ec;
+  --surface: #fffdf8;
+  --surface-2: #f6efe0;
+  --foreground: #1d1b19;
+  --ink: #1d1b19;
+  --muted: #5f5a52;
+  --subtle: #8c8579;
+  --border: rgb(29 27 25 / 0.16);
+  --border-strong: rgb(29 27 25 / 0.32);
+  --dots: rgb(29 27 25 / 0.13);
+  --accent: #e5486b;
+  --accent-hover: #d23a5d;
+  --accent-soft: #ffe3e9;
+  --accent-ink: #b3264a;
   --on-accent: #ffffff;
-  --success: #15803d;
-  --success-soft: #e9f7ee;
+  --highlight: #ffd84d;
+  --note-yellow: #fff1b8;
+  --note-pink: #ffdfe6;
+  --note-mint: #d5f3df;
+  --note-sky: #dbeaff;
+  --success: #1f8a4c;
+  --success-soft: #dff5e6;
   --danger: #c2410c;
-  --danger-soft: #fdf0e8;
-  --code-bg: #f7f7fa;
-  --glow: rgba(91, 91, 214, 0.18);
-  /* Chart series: validated categorical slots 1-3 (dataviz reference palette) */
-  --series-1: #2a78d6;
-  --series-2: #eb6834;
+  --danger-soft: #ffe9dc;
+  --code-bg: #fdf9ef;
+  --glow: rgb(229 72 107 / 0.18);
+  /* Chart series: validated categorical slots (dataviz validator, light, paper surface) */
+  --series-1: #e5486b;
+  --series-2: #2a78d6;
   --series-3: #1baf7a;
   /* SQL highlighting */
-  --syn-keyword: #5b5bd6;
+  --syn-keyword: #b3264a;
   --syn-string: #0f7b5f;
   --syn-number: #b45309;
-  --syn-func: #be185d;
-  --syn-comment: #9a9aa8;
+  --syn-func: #2a5fb0;
+  --syn-comment: #8c8579;
 }
 
+/* Dark theme: chalkboard */
 @media (prefers-color-scheme: dark) {
   :root:where(:not([data-theme="light"])) {
     color-scheme: dark;
-    --background: #0d0d12;
-    --surface: #15151c;
-    --surface-2: #1c1c25;
-    --foreground: #ececf1;
-    --muted: #9c9cab;
-    --subtle: #6c6c7a;
-    --border: #262631;
-    --border-strong: #33333f;
-    --accent: #8b8bf5;
-    --accent-hover: #a0a0f8;
-    --accent-soft: #23234a;
-    --accent-ink: #b9b9ff;
-    --on-accent: #0d0d1f;
-    --success: #4ade80;
-    --success-soft: #12261a;
+    --background: #1f2427;
+    --surface: #262c30;
+    --surface-2: #2e353a;
+    --foreground: #f3efe6;
+    --ink: #f3efe6;
+    --muted: #bab5a9;
+    --subtle: #8a877d;
+    --border: rgb(243 239 230 / 0.16);
+    --border-strong: rgb(243 239 230 / 0.32);
+    --dots: rgb(243 239 230 / 0.09);
+    --accent: #ff6f8e;
+    --accent-hover: #ff8aa3;
+    --accent-soft: #4a2733;
+    --accent-ink: #ffb6c5;
+    --on-accent: #1f2427;
+    --highlight: #e9c64a;
+    --note-yellow: #3d3824;
+    --note-pink: #43292f;
+    --note-mint: #23392c;
+    --note-sky: #263547;
+    --success: #6ee7a0;
+    --success-soft: #1f3a2a;
     --danger: #fb923c;
-    --danger-soft: #2e1c12;
-    --code-bg: #111117;
-    --glow: rgba(139, 139, 245, 0.16);
-    --series-1: #3987e5;
-    --series-2: #d95926;
+    --danger-soft: #40291c;
+    --code-bg: #22282b;
+    --glow: rgb(255 111 142 / 0.14);
+    --series-1: #e85b79;
+    --series-2: #3987e5;
     --series-3: #199e70;
-    --syn-keyword: #a5a5ff;
-    --syn-string: #5eead4;
+    --syn-keyword: #ffb6c5;
+    --syn-string: #7ee0bf;
     --syn-number: #fbbf24;
-    --syn-func: #f9a8d4;
-    --syn-comment: #6c6c7a;
+    --syn-func: #9cc4ff;
+    --syn-comment: #8a877d;
   }
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --background: #0d0d12;
-  --surface: #15151c;
-  --surface-2: #1c1c25;
-  --foreground: #ececf1;
-  --muted: #9c9cab;
-  --subtle: #6c6c7a;
-  --border: #262631;
-  --border-strong: #33333f;
-  --accent: #8b8bf5;
-  --accent-hover: #a0a0f8;
-  --accent-soft: #23234a;
-  --accent-ink: #b9b9ff;
-  --on-accent: #0d0d1f;
-  --success: #4ade80;
-  --success-soft: #12261a;
+  --background: #1f2427;
+  --surface: #262c30;
+  --surface-2: #2e353a;
+  --foreground: #f3efe6;
+  --ink: #f3efe6;
+  --muted: #bab5a9;
+  --subtle: #8a877d;
+  --border: rgb(243 239 230 / 0.16);
+  --border-strong: rgb(243 239 230 / 0.32);
+  --dots: rgb(243 239 230 / 0.09);
+  --accent: #ff6f8e;
+  --accent-hover: #ff8aa3;
+  --accent-soft: #4a2733;
+  --accent-ink: #ffb6c5;
+  --on-accent: #1f2427;
+  --highlight: #e9c64a;
+  --note-yellow: #3d3824;
+  --note-pink: #43292f;
+  --note-mint: #23392c;
+  --note-sky: #263547;
+  --success: #6ee7a0;
+  --success-soft: #1f3a2a;
   --danger: #fb923c;
-  --danger-soft: #2e1c12;
-  --code-bg: #111117;
-  --glow: rgba(139, 139, 245, 0.16);
-  --series-1: #3987e5;
-  --series-2: #d95926;
+  --danger-soft: #40291c;
+  --code-bg: #22282b;
+  --glow: rgb(255 111 142 / 0.14);
+  --series-1: #e85b79;
+  --series-2: #3987e5;
   --series-3: #199e70;
-  --syn-keyword: #a5a5ff;
-  --syn-string: #5eead4;
+  --syn-keyword: #ffb6c5;
+  --syn-string: #7ee0bf;
   --syn-number: #fbbf24;
-  --syn-func: #f9a8d4;
-  --syn-comment: #6c6c7a;
+  --syn-func: #9cc4ff;
+  --syn-comment: #8a877d;
 }
 
 @theme inline {
@@ -103,6 +131,7 @@
   --color-surface: var(--surface);
   --color-surface-2: var(--surface-2);
   --color-foreground: var(--foreground);
+  --color-ink: var(--ink);
   --color-muted: var(--muted);
   --color-subtle: var(--subtle);
   --color-border: var(--border);
@@ -112,12 +141,18 @@
   --color-accent-soft: var(--accent-soft);
   --color-accent-ink: var(--accent-ink);
   --color-on-accent: var(--on-accent);
+  --color-highlight: var(--highlight);
+  --color-note-yellow: var(--note-yellow);
+  --color-note-pink: var(--note-pink);
+  --color-note-mint: var(--note-mint);
+  --color-note-sky: var(--note-sky);
   --color-success: var(--success);
   --color-success-soft: var(--success-soft);
   --color-danger: var(--danger);
   --color-danger-soft: var(--danger-soft);
   --color-code: var(--code-bg);
-  --font-sans: var(--font-geist-sans);
+  --font-sans: var(--font-shantell);
+  --font-hand: var(--font-caveat);
   --font-mono: var(--font-geist-mono);
 }
 
@@ -126,39 +161,137 @@ body {
   color: var(--foreground);
 }
 
-/* Soft glow + faint grid behind the hero */
+/* Dotted notebook paper */
 .page-backdrop {
-  background:
-    radial-gradient(60rem 28rem at 50% -8rem, var(--glow), transparent 70%),
-    linear-gradient(to bottom, transparent, var(--background) 28rem),
-    repeating-linear-gradient(
-      0deg,
-      color-mix(in srgb, var(--border) 55%, transparent) 0 1px,
-      transparent 1px 48px
-    ),
-    repeating-linear-gradient(
-      90deg,
-      color-mix(in srgb, var(--border) 55%, transparent) 0 1px,
-      transparent 1px 48px
-    );
   background-color: var(--background);
+  background-image: radial-gradient(var(--dots) 1.2px, transparent 1.3px);
+  background-size: 22px 22px;
 }
 
+/* ---------------------------------------------------------------- sketchy shapes */
+
+/* Slightly uneven corners read as hand-drawn without looking broken. */
 .card {
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 1rem;
-  box-shadow:
-    0 1px 2px rgb(0 0 0 / 0.04),
-    0 4px 16px -8px rgb(0 0 0 / 0.08);
+  border: 2px solid var(--ink);
+  border-radius: 18px 24px 16px 22px / 22px 16px 24px 18px;
+  box-shadow: 4px 4px 0 var(--ink);
 }
 
-.text-gradient {
-  background: linear-gradient(120deg, var(--foreground) 30%, var(--accent) 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+.sketch {
+  border: 2px solid var(--ink);
+  border-radius: 14px 18px 12px 20px / 18px 12px 20px 14px;
 }
+
+.sketch-sm {
+  border: 1.5px solid var(--ink);
+  border-radius: 10px 14px 9px 15px / 14px 9px 15px 10px;
+}
+
+/* Primary button: filled, ink outline, hard shadow that presses down. */
+.btn-ink {
+  border: 2px solid var(--ink);
+  border-radius: 12px 16px 11px 17px / 16px 11px 17px 12px;
+  background: var(--accent);
+  color: var(--on-accent);
+  box-shadow: 3px 3px 0 var(--ink);
+  transition:
+    transform 0.08s ease,
+    box-shadow 0.08s ease,
+    background-color 0.15s ease;
+}
+.btn-ink:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+.btn-ink:active:not(:disabled) {
+  transform: translate(3px, 3px);
+  box-shadow: 0 0 0 var(--ink);
+}
+.btn-ink:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Secondary: paper button with outline and a small shadow. */
+.btn-paper {
+  border: 2px solid var(--ink);
+  border-radius: 12px 16px 11px 17px / 16px 11px 17px 12px;
+  background: var(--surface);
+  color: var(--foreground);
+  box-shadow: 2px 2px 0 var(--ink);
+  transition:
+    transform 0.08s ease,
+    box-shadow 0.08s ease;
+}
+.btn-paper:hover:not(:disabled) {
+  transform: translate(-1px, -1px);
+  box-shadow: 3px 3px 0 var(--ink);
+}
+.btn-paper:active:not(:disabled) {
+  transform: translate(2px, 2px);
+  box-shadow: 0 0 0 var(--ink);
+}
+
+/* Sticky notes for suggestions: pastel, slightly turned, lift on hover. */
+.note {
+  border: 2px solid var(--ink);
+  border-radius: 6px 10px 6px 12px / 10px 6px 12px 6px;
+  box-shadow: 3px 3px 0 var(--ink);
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease;
+}
+.note:hover:not(:disabled) {
+  transform: rotate(0deg) translate(-2px, -2px) !important;
+  box-shadow: 5px 5px 0 var(--ink);
+}
+
+/* Highlighter stroke behind a word. */
+.hl {
+  position: relative;
+  z-index: 0;
+  white-space: nowrap;
+}
+.hl::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  left: -0.12em;
+  right: -0.12em;
+  bottom: 0.08em;
+  height: 0.55em;
+  background: var(--highlight);
+  border-radius: 0.3em 0.1em 0.35em 0.15em;
+  transform: rotate(-1.5deg);
+}
+
+/* Hand-drawn squiggle underline, colored by `color`. */
+.squiggle {
+  position: relative;
+}
+.squiggle::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -0.32em;
+  height: 0.35em;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 10' preserveAspectRatio='none'%3E%3Cpath d='M2 6c8-5 14 3 22-1s14-4 22 0 14 4 22 0 14-4 22 0 14 3 26-2' fill='none' stroke='black' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E")
+    center / 100% 100% no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 10' preserveAspectRatio='none'%3E%3Cpath d='M2 6c8-5 14 3 22-1s14-4 22 0 14 4 22 0 14-4 22 0 14 3 26-2' fill='none' stroke='black' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E")
+    center / 100% 100% no-repeat;
+}
+
+/* Open Doodles illustrations */
+.doodle .doodle-ink {
+  fill: var(--ink);
+}
+.doodle .doodle-accent {
+  fill: var(--accent);
+}
+
+/* ---------------------------------------------------------------- motion */
 
 @keyframes fade-up {
   from {
@@ -200,6 +333,50 @@ body {
   animation: pop-in 0.18s ease-out both;
 }
 
+/* A gentle bob for the "thinking" doodle. */
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+@keyframes wiggle {
+  0%,
+  100% {
+    transform: rotate(-2deg);
+  }
+  50% {
+    transform: rotate(2deg);
+  }
+}
+.animate-wiggle {
+  animation: wiggle 2.4s ease-in-out infinite;
+}
+
+@keyframes dot-bounce {
+  0%,
+  80%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  40% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+.typing-dot {
+  display: inline-block;
+  animation: dot-bounce 1.2s ease-in-out infinite;
+}
+
 @keyframes shimmer {
   from {
     background-position: -200% 0;
@@ -219,8 +396,16 @@ body {
   .animate-fade-up,
   .animate-slide-in,
   .animate-pop-in,
+  .animate-float,
+  .animate-wiggle,
+  .typing-dot,
   .skeleton,
   .animate-spin {
     animation: none;
+  }
+  .note,
+  .btn-ink,
+  .btn-paper {
+    transition: none;
   }
 }

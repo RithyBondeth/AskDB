@@ -221,7 +221,7 @@ export default function CommandPalette({
                   onMouseMove={() => setIndex(i)}
                   onClick={() => choose(i)}
                   className={`flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left text-sm transition ${
-                    i === index ? "bg-accent-soft text-accent-ink" : "text-foreground"
+                    i === index ? "bg-highlight text-[#1d1b19]" : "text-foreground"
                   }`}
                 >
                   <Icon className={`size-4 shrink-0 ${i === index ? "" : "text-muted"}`} />
