@@ -165,8 +165,9 @@ def health(registry: Registry, database: str | None = Query(None)) -> dict:
         "status": "ok",
         "dialect": db.schema.dialect,
         "tables": len(db.schema.tables),
-        "default_provider": db.settings.provider,
-        "providers": {"claude": db.model_name("claude"), "local": db.model_name("local")},
+        "default_provider": db.default_provider,
+        "providers": {p: db.model_name(p) for p in ("claude", "free", "local")},
+        "configured": db.configured,
     }
 
 
@@ -230,7 +231,7 @@ def ask(req: AskRequest, registry: Registry) -> AskResponse:
     # Sync endpoint: FastAPI runs it in a worker thread, so the blocking SDK
     # and DB calls don't stall the event loop.
     db = resolve(registry, req.database)
-    provider = req.provider or db.settings.provider
+    provider = req.provider or db.default_provider
     try:
         ans = db.ask(req.question.strip(), provider=provider, context=_context(req))
     except Exception as e:
@@ -244,7 +245,7 @@ def ask_stream(req: AskRequest, registry: Registry) -> StreamingResponse:
     """Same as /api/ask, as Server-Sent Events: progress events while the pipeline
     runs, then one `result` or `error` event."""
     db = resolve(registry, req.database)
-    provider = req.provider or db.settings.provider
+    provider = req.provider or db.default_provider
     events: queue.Queue[dict | None] = queue.Queue()
 
     def work() -> None:

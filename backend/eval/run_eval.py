@@ -79,14 +79,17 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--out", type=Path, default=None, help="write per-question results JSON")
     parser.add_argument(
-        "--provider", choices=["claude", "local"], default=None, help="override ASKDB_PROVIDER"
+        "--provider",
+        choices=["claude", "free", "local"],
+        default=None,
+        help="override ASKDB_PROVIDER",
     )
     args = parser.parse_args()
 
     rows = [json.loads(line) for line in DATASET.read_text().splitlines() if line.strip()]
     rows = rows[: args.limit] if args.limit else rows
     db = AskDB.from_settings()
-    provider = args.provider or db.settings.provider
+    provider = args.provider or db.default_provider
     print(f"Provider: {provider} ({db.model_name(provider)})\n")
 
     results, hits, self_corrected = [], 0, 0

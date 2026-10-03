@@ -1,7 +1,7 @@
 // Mirrors the response models in backend/api/main.py.
 
 export type Cell = string | number | boolean | null;
-export type Provider = "claude" | "local";
+export type Provider = "claude" | "free" | "local";
 export type Stage = "generate" | "validate" | "execute";
 
 export interface Attempt {
@@ -73,6 +73,8 @@ export interface HealthResponse {
   tables: number;
   default_provider: Provider;
   providers: Record<Provider, string>;
+  /** Whether each provider has its key configured on the server. */
+  configured: Record<Provider, boolean>;
 }
 
 /** Events from POST /api/ask/stream. */

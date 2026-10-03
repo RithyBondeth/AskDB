@@ -19,11 +19,20 @@ class Settings(BaseSettings):
 
     # SQLAlchemy URL. Defaults to the bundled Chinook sample database.
     database_url: str = f"sqlite:///{BACKEND_DIR / 'data' / 'chinook.sqlite'}"
-    # Which generator answers by default: Claude, or an open model served locally.
-    provider: Literal["claude", "local"] = "claude"
+    # Which generator answers by default: a free hosted model (the default, so
+    # testing costs nothing), Claude, or an open model served locally. "auto" uses
+    # Claude when Anthropic credentials are set, otherwise the free model.
+    provider: Literal["auto", "claude", "free", "local"] = "free"
 
     model: str = "claude-opus-5-5"
     effort: str = "medium"
+
+    # Free hosted model (provider="free"): any OpenAI-compatible chat API.
+    # Default is Google Gemini's free tier (key: https://aistudio.google.com/apikey).
+    free_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai"
+    free_api_key: SecretStr | None = None
+    free_model: str = "gemini-flash-latest"
+    free_timeout_s: float = 120.0
 
     # Open model (provider="local"). Defaults to Arctic-Text2SQL-R1-7B via Ollama.
     local_model: str = "hf.co/mradermacher/Arctic-Text2SQL-R1-7B-GGUF:Q4_K_M"

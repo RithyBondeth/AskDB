@@ -5,6 +5,7 @@ import {
   Cpu,
   CornerDownLeft,
   Database,
+  Gift,
   History,
   Lightbulb,
   Moon,
@@ -15,7 +16,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import type { DatabaseInfo } from "@/lib/types";
+import type { DatabaseInfo, Provider } from "@/lib/types";
 
 export interface Command {
   id: string;
@@ -44,7 +45,7 @@ export function buildCommands({
   currentDatabase: string;
   ask: (q: string) => void;
   newChat: () => void;
-  setProvider: (p: "claude" | "local") => void;
+  setProvider: (p: Provider) => void;
   cycleTheme: () => void;
   selectDatabase: (id: string) => void;
   upload: (() => void) | null;
@@ -68,6 +69,13 @@ export function buildCommands({
       label: "Use Claude",
       icon: Bot,
       run: () => setProvider("claude"),
+    },
+    {
+      id: "free",
+      group: "Actions",
+      label: "Use the free model",
+      icon: Gift,
+      run: () => setProvider("free"),
     },
     {
       id: "local",

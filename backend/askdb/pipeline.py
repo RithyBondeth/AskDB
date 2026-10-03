@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import os
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -13,11 +14,12 @@ from askdb.config import Settings, get_settings
 from askdb.db import make_engine
 from askdb.execute import Answer, EventHandler, answer, run_sql
 from askdb.generate import ClaudeGenerator, SQLGenerator, Turn, build_system_prompt
+from askdb.hosted import HostedGenerator
 from askdb.local import LocalGenerator
 from askdb.prompts import FEW_SHOT_EXAMPLES
 from askdb.schema import Schema, introspect, link_tables
 
-Provider = Literal["claude", "local"]
+Provider = Literal["claude", "free", "local"]
 
 
 @dataclass
@@ -73,9 +75,37 @@ class AskDB:
             )
         return self._client
 
+    @property
+    def has_anthropic_credentials(self) -> bool:
+        return bool(
+            self.settings.anthropic_api_key
+            or os.environ.get("ANTHROPIC_API_KEY")
+            or os.environ.get("ANTHROPIC_AUTH_TOKEN")
+        )
+
+    @property
+    def configured(self) -> dict[str, bool]:
+        """Which providers have what they need (the local server isn't checked)."""
+        return {
+            "claude": self.has_anthropic_credentials,
+            "free": self.settings.free_api_key is not None,
+            "local": True,
+        }
+
+    @property
+    def default_provider(self) -> Provider:
+        p = self.settings.provider
+        if p != "auto":
+            return p
+        return "claude" if self.has_anthropic_credentials else "free"
+
     def model_name(self, provider: Provider | None = None) -> str:
-        provider = provider or self.settings.provider
-        return self.settings.local_model if provider == "local" else self.settings.model
+        provider = provider or self.default_provider
+        return {
+            "claude": self.settings.model,
+            "free": self.settings.free_model,
+            "local": self.settings.local_model,
+        }[provider]
 
     def generator_for(
         self,
@@ -83,7 +113,7 @@ class AskDB:
         provider: Provider | None = None,
         context: list[Turn] | None = None,
     ) -> SQLGenerator:
-        provider = provider or self.settings.provider
+        provider = provider or self.default_provider
         # Link on the whole conversation so follow-ups keep the tables they build on.
         linking_text = " ".join([*(t.question for t in context or []), question])
         tables = link_tables(self.schema, linking_text)
@@ -105,6 +135,16 @@ class AskDB:
             reference_date=self.reference_date,
             examples=self.examples,
         )
+        if provider == "free":
+            key = self.settings.free_api_key
+            return HostedGenerator(
+                system,
+                model=self.settings.free_model,
+                base_url=self.settings.free_base_url,
+                api_key=key.get_secret_value() if key else None,
+                context=context,
+                timeout_s=self.settings.free_timeout_s,
+            )
         return ClaudeGenerator(
             system,
             model=self.settings.model,

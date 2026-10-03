@@ -38,7 +38,7 @@ def test_ask_returns_rows_chart_and_attempts(db_path, scripted):
     assert body["rows"][0] == ["US", 30.0]
     assert body["chart"]["type"] == "bar"
     assert [a["stage"] for a in body["attempts"]] == ["execute", None]
-    assert body["provider"] == "claude" and body["model"] == "claude-opus-5-5"
+    assert body["provider"] == "free" and body["model"] == "gemini-flash-latest"
 
 
 def test_ask_can_choose_the_open_model(db_path, scripted):
@@ -59,7 +59,8 @@ def test_unknown_provider_is_rejected(db_path, scripted):
 
 def test_health_lists_providers(db_path, scripted):
     body = make_client(db_path, scripted()).get("/api/health").json()
-    assert set(body["providers"]) == {"claude", "local"}
+    assert set(body["providers"]) == {"claude", "free", "local"}
+    assert set(body["configured"]) == {"claude", "free", "local"}
 
 
 def test_ask_reports_failed_attempts(db_path, scripted):

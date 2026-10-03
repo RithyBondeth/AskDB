@@ -35,13 +35,16 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
-**A model to generate SQL.** You need at least one of these:
+**A model to generate SQL.** The default is free:
 
-- **Claude** (recommended, fastest): an Anthropic API key from
+- **Free model (default):** a free Google Gemini API key from
+  [aistudio.google.com/apikey](https://aistudio.google.com/apikey). Sign in with
+  a Google account and click **Create API key**. No credit card needed.
+- **Claude** (optional, most accurate): an Anthropic API key from
   [platform.claude.com](https://platform.claude.com/). Each question costs a
   small amount of API credit.
-- **Open model** (free, runs offline): [Ollama](https://ollama.com) and about
-  6 GB of free RAM. See [section 5](#5-optional-run-the-open-source-model).
+- **Open model** (optional, free, runs offline): [Ollama](https://ollama.com)
+  and about 6 GB of free RAM. See [section 5](#5-optional-run-the-open-source-model).
 
 ---
 
@@ -65,14 +68,31 @@ cp .env.example .env        # Windows: copy .env.example .env
 uv sync                     # creates .venv and installs dependencies
 ```
 
-Open `backend/.env` in an editor and set your key:
+Open `backend/.env` in an editor and paste your free Gemini key:
 
 ```
-ANTHROPIC_API_KEY=sk-ant-...
+ASKDB_FREE_API_KEY=AIza...
 ```
 
-No key? Set `ASKDB_PROVIDER=local` instead and follow
-[section 5](#5-optional-run-the-open-source-model).
+That's all you need. To also use Claude, add `ANTHROPIC_API_KEY=sk-ant-...` and
+pick **Claude** in the UI (or set `ASKDB_PROVIDER=claude` to make it the
+default).
+
+**Using a different free service.** Any OpenAI-compatible chat API works. Set
+the base URL and model as well as the key, then restart the backend:
+
+| Service | `ASKDB_FREE_BASE_URL` | `ASKDB_FREE_MODEL` |
+| --- | --- | --- |
+| Google Gemini (default) | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-flash-latest` |
+| [Groq](https://console.groq.com/keys) | `https://api.groq.com/openai/v1` | `openai/gpt-oss-120b` |
+| [OpenRouter](https://openrouter.ai/keys) | `https://openrouter.ai/api/v1` | any model ending in `:free` |
+| LM Studio (local) | `http://localhost:1234/v1` | the model you loaded |
+
+Free model names change over time. To see which models your key can use:
+
+```bash
+uv run askdb --list-models
+```
 
 ### Frontend
 
@@ -219,6 +239,8 @@ From `backend/`:
 uv run askdb "Which artist has the most albums?"
 uv run askdb --show-schema "Total revenue per year"
 uv run askdb --provider local "How many tracks are in each genre?"
+uv run askdb --provider claude "Revenue per year"
+uv run askdb --list-models          # models your free-model key can use
 ```
 
 Only the backend's dependencies are needed for this. The web servers don't
@@ -285,7 +307,11 @@ All settings go in `backend/.env`. Every one is optional except a model source.
 | Variable | Default | What it does |
 | --- | --- | --- |
 | `ANTHROPIC_API_KEY` | none | Key for Claude |
-| `ASKDB_PROVIDER` | `claude` | Default model: `claude` or `local` |
+| `ASKDB_PROVIDER` | `free` | Default model: `free`, `claude`, `local`, or `auto` (Claude when `ANTHROPIC_API_KEY` is set, otherwise free) |
+| `ASKDB_FREE_API_KEY` | none | Key for the free model (free Gemini key from aistudio.google.com/apikey) |
+| `ASKDB_FREE_BASE_URL` | Gemini's OpenAI-compatible URL | Any OpenAI-compatible chat API |
+| `ASKDB_FREE_MODEL` | `gemini-flash-latest` | Model name at that API (`uv run askdb --list-models`) |
+| `ASKDB_FREE_TIMEOUT_S` | `120` | Seconds to wait for the free model |
 | `ASKDB_MODEL` | `claude-opus-5-5` | Claude model ID |
 | `ASKDB_EFFORT` | `medium` | Claude effort: `low`, `medium`, `high`, `xhigh`, `max` |
 | `ASKDB_LOCAL_MODEL` | `hf.co/mradermacher/Arctic-Text2SQL-R1-7B-GGUF:Q4_K_M` | Open model name, as Ollama knows it |
@@ -337,7 +363,11 @@ databases than on PostgreSQL.
 
 | Problem | Likely cause and fix |
 | --- | --- |
-| `No Anthropic credentials found` | `ANTHROPIC_API_KEY` is missing from `backend/.env`, or you started the backend before saving it. Fix the file and restart the backend. |
+| `No API key for the free model` | `ASKDB_FREE_API_KEY` is missing from `backend/.env`, or you started the backend before saving it. Get a free key at aistudio.google.com/apikey, then restart the backend. |
+| `The free model API rejected the key` | The key is wrong or was deleted. Create a new one and paste it again. |
+| `Model "…" not found` | That model name isn't available to your key. Run `uv run askdb --list-models` and set `ASKDB_FREE_MODEL` to one of them. |
+| `Free-tier rate limit reached` | Free tiers allow only a few requests per minute. Wait a minute and try again. |
+| `No Anthropic credentials found` | You picked Claude, but `ANTHROPIC_API_KEY` is missing from `backend/.env`. Add it and restart the backend, or switch back to **Free**. |
 | `Anthropic API key is missing or invalid` | The key is wrong or revoked. Create a new one. |
 | `Cannot reach the AskDB API at http://127.0.0.1:8000` | The backend isn't running. Start it in terminal 1. |
 | Schema sidebar says "Backend unreachable" | Same as above. |

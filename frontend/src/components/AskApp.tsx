@@ -68,7 +68,7 @@ function loadDatabase(): string {
 export default function AskApp() {
   const [question, setQuestion] = useState("");
   const [turns, setTurns] = useState<Turn[]>([]);
-  const [provider, setProvider] = useState<Provider>("claude");
+  const [provider, setProvider] = useState<Provider>("free");
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [offline, setOffline] = useState(false);
   const [history, setHistory] = useState<string[]>([]);
@@ -361,6 +361,7 @@ export default function AskApp() {
       provider={provider}
       onProviderChange={setProvider}
       models={health?.providers ?? null}
+      configured={health?.configured ?? null}
       busy={busy}
       followUpTo={lastDone?.question ?? null}
       example={schema?.suggestions[0]}

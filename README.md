@@ -11,7 +11,9 @@ returns an error, and answers with a table and an automatically chosen chart.
 sortable, filterable results with bar/line charts and CSV export · ⌘K command
 palette · share links (`?q=`) · light and dark themes.
 
-Works with **Claude** or an **open-source model running on your own machine**
+Works with a **free hosted model** by default (Google Gemini's free tier, or any
+OpenAI-compatible API such as Groq or OpenRouter), **Claude**, or an
+**open-source model on your own machine**
 ([Arctic-Text2SQL-R1-7B](https://hf.co/Snowflake/Arctic-Text2SQL-R1-7B) via
 Ollama). Switch between them per question in the UI.
 
@@ -19,6 +21,7 @@ Ollama). Switch between them per question in the UI.
 
 | Model | Execution accuracy | Fixed by self-correction | Median s/question |
 | --- | --- | --- | --- |
+| `gemini-flash-latest` (free) | _run the eval_ | | |
 | `claude-opus-5-5` | _run the eval_ | | |
 | `Arctic-Text2SQL-R1-7B` (Q4_K_M, local) | _run the eval_ | | |
 
@@ -58,7 +61,7 @@ question
 | Layer | Choice |
 | --- | --- |
 | Database | SQLite with the bundled [Chinook](https://github.com/lerocha/chinook-database) sample (Postgres supported via `ASKDB_DATABASE_URL`) |
-| LLM | Claude (`claude-opus-5-5`) through the Anthropic Python SDK, or [Arctic-Text2SQL-R1-7B](https://hf.co/Snowflake/Arctic-Text2SQL-R1-7B) (open, Apache-2.0) served by Ollama |
+| LLM | A free model through any OpenAI-compatible API (default: Gemini free tier), Claude (`claude-opus-5-5`) through the Anthropic Python SDK, or [Arctic-Text2SQL-R1-7B](https://hf.co/Snowflake/Arctic-Text2SQL-R1-7B) (open, Apache-2.0) served by Ollama |
 | DB access | SQLAlchemy |
 | SQL parsing | sqlglot |
 | API | FastAPI |
@@ -70,14 +73,15 @@ question
 > The full guide, covering configuration, the open model, your own database,
 > and troubleshooting, is in **[docs/RUNNING.md](docs/RUNNING.md)**. Quick version:
 
-Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/), Node 20+, and an
-[Anthropic API key](https://platform.claude.com/).
+Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/), Node 20+, and a
+free [Gemini API key](https://aistudio.google.com/apikey) (no credit card).
+An [Anthropic API key](https://platform.claude.com/) is optional, for Claude.
 
 **Backend** (port 8000):
 
 ```bash
 cd backend
-cp .env.example .env          # add your ANTHROPIC_API_KEY
+cp .env.example .env          # add ASKDB_FREE_API_KEY (and ANTHROPIC_API_KEY for Claude)
 uv sync
 uv run uvicorn api.main:app --reload --port 8000
 ```
@@ -189,6 +193,15 @@ be used to reach other files. Uploads get no Chinook few-shot examples, and
 "today" is the real date. There are no user accounts, so every user of a
 server sees every upload: set `ASKDB_ALLOW_UPLOADS=false` on a public demo.
 
+**Free model by default.** Testing shouldn't cost money, so the default
+provider is a free hosted model: Google Gemini's free tier through its
+OpenAI-compatible endpoint (`askdb/hosted.py`). It gets the same prompt,
+few-shot examples, follow-up context, error feedback, and validation as Claude.
+Any OpenAI-compatible chat API works (Groq, OpenRouter, Hugging Face,
+LM Studio) by changing `ASKDB_FREE_BASE_URL` and `ASKDB_FREE_MODEL`. Free tiers
+have rate limits, and Google may use free-tier prompts to improve its products,
+so use Claude or the local model for private data.
+
 **Follow-ups.** The UI sends the last three answered questions and their SQL
 as `context`. Claude sees them as earlier conversation turns. The open model is
 single-turn, so they go into its prompt as "earlier in this conversation".
@@ -216,12 +229,15 @@ predicted query returns the same rows as the gold query:
 ```bash
 cd backend
 uv run python eval/run_eval.py --limit 5                                   # smoke run
-uv run python eval/run_eval.py --out eval/results/claude-opus-5-5.json
+uv run python eval/run_eval.py --out eval/results/gemini-free.json
+uv run python eval/run_eval.py --provider claude --out eval/results/claude-opus-5-5.json
 uv run python eval/run_eval.py --provider local --out eval/results/arctic-7b-q4.json
 uv run python eval/compare.py      # Markdown table for the README + questions where they differ
 ```
 
-Claude runs make real API calls. Local runs are free but slower. Commit the
+Free-model runs are limited by the provider's rate limits (Gemini's free tier
+allows a few requests per minute, so a full run takes a while). Claude runs make
+real paid API calls. Local runs are free but slower. Commit the
 results files to track accuracy across prompt and model changes. The dataset has 15 items and the target is
 30–50.
 
@@ -229,7 +245,8 @@ results files to track accuracy across prompt and model changes. The dataset has
 
 ```
 backend/
-  askdb/           pipeline: schema, prompts, generate (Claude), local (open model),
+  askdb/           pipeline: schema, prompts, generate (Claude), hosted (free model),
+                   local (open model),
                    validate, execute, present; sources + importers (uploads)
   api/main.py      FastAPI app
   data/            chinook.sqlite (bundled sample) and uploads/ (git-ignored)
@@ -255,5 +272,6 @@ minified, and recolored to match the theme (`frontend/src/lib/doodles.ts`).
 - [x] Week 3: web UI with table and automatic chart, few-shot prompt
 - [x] Open model: Arctic-Text2SQL-R1-7B via Ollama, switchable per question
 - [x] Upload your own data: SQLite files or CSVs
+- [x] Free hosted model as the default (Gemini free tier or any OpenAI-compatible API)
 - [ ] Week 4: grow the eval set, record Claude vs. open-model accuracy, demo GIF, deploy
 - [ ] Stretch: embedding-based schema linking, point it at your own data

@@ -107,7 +107,9 @@ export default function TurnView({
                 <p className="mt-1 max-w-xs text-sm text-muted">
                   {turn.provider === "local"
                     ? "The open model reasons step by step. On a laptop this can take a minute."
-                    : "Writing SQL, checking it’s read-only, and running it."}
+                    : turn.provider === "free"
+                      ? "Asking the free model, then checking the SQL is read-only and running it."
+                      : "Writing SQL, checking it’s read-only, and running it."}
                 </p>
               </div>
             </div>
