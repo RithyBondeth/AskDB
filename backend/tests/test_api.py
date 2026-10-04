@@ -176,3 +176,8 @@ def test_key_check(db_path, scripted, monkeypatch):
 
     monkeypatch.setattr(api.main, "list_models", rejected)
     assert check("bad") == {"ok": False, "message": "That key was rejected."}
+
+
+def test_root_points_to_the_web_app(db_path, scripted):
+    res = make_client(db_path, scripted("SELECT 1")).get("/")
+    assert res.status_code == 200 and "localhost:3000" in res.json()["message"]

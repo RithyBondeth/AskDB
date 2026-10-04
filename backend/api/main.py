@@ -173,6 +173,17 @@ def _context(req: AskRequest) -> list[Turn]:
 # ---------------------------------------------------------------- routes
 
 
+@app.get("/", include_in_schema=False)
+def root() -> dict:
+    # Opening the API port in a browser shouldn't look like a broken app.
+    return {
+        "name": "AskDB API",
+        "message": "This is the backend. Open the web app at http://localhost:3000.",
+        "docs": "/docs",
+        "health": "/api/health",
+    }
+
+
 @app.get("/api/health")
 def health(registry: Registry, database: str | None = Query(None)) -> dict:
     db = resolve(registry, database)
