@@ -1,10 +1,19 @@
-import { KEY_HEADER } from "@/lib/keys";
+import { KEY_HEADER, type KeyProvider } from "@/lib/keys";
 import { ownerHeaders } from "@/lib/owner";
-import type { AskError, AskResponse, DatabaseInfo, Provider, StreamEvent } from "@/lib/types";
+import type {
+  AskError,
+  AskResponse,
+  DatabaseInfo,
+  ModelsResponse,
+  Provider,
+  StreamEvent,
+} from "@/lib/types";
 
 export interface AskOptions {
   question: string;
   provider: Provider;
+  /** A model from /api/models; undefined uses the provider's default. */
+  model?: string;
   database: string;
   context: { question: string; sql: string }[];
   /** The user's own key for `provider`, if they added one. */
@@ -18,6 +27,7 @@ export interface AskOptions {
 export async function askStream({
   question,
   provider,
+  model,
   database,
   context,
   apiKey,
@@ -32,7 +42,7 @@ export async function askStream({
         "content-type": "application/json",
         ...(apiKey ? { [KEY_HEADER]: apiKey } : {}),
       }),
-      body: JSON.stringify({ question, provider, context, database }),
+      body: JSON.stringify({ question, provider, model, context, database }),
       signal,
     });
   } catch {
@@ -139,7 +149,7 @@ async function errorFrom(res: Response): Promise<AskError> {
 
 /** Try a key without spending tokens (the backend lists the provider's models). */
 export async function checkKey(
-  provider: "free" | "claude",
+  provider: KeyProvider,
   key: string,
 ): Promise<{ ok: boolean; message: string }> {
   try {
@@ -153,4 +163,13 @@ export async function checkKey(
   } catch {
     return { ok: false, message: "Network error: could not reach the server." };
   }
+}
+
+/** The models a provider offers this user (more with their own key). */
+export async function fetchModels(provider: Provider, apiKey?: string): Promise<ModelsResponse> {
+  const res = await fetch(`/api/models?provider=${encodeURIComponent(provider)}`, {
+    headers: ownerHeaders(apiKey ? { [KEY_HEADER]: apiKey } : {}),
+  });
+  if (!res.ok) throw await errorFrom(res);
+  return (await res.json()) as ModelsResponse;
 }

@@ -14,11 +14,12 @@ returns an error, and answers with a table and an automatically chosen chart.
 sortable, filterable results with bar/line charts and CSV export · ⌘K command
 palette · share links (`?q=`) · light and dark themes.
 
-Works with a **free hosted model** by default (Google Gemini's free tier, or any
-OpenAI-compatible API such as Groq or OpenRouter), **Claude**, or an
-**open-source model on your own machine**
-([Arctic-Text2SQL-R1-7B](https://hf.co/Snowflake/Arctic-Text2SQL-R1-7B) via
-Ollama). Switch between them per question in the UI.
+Works with a **free hosted model** by default (Google Gemini's free tier),
+**Claude** (Opus, Sonnet, Haiku or Fable), **Groq**, **OpenRouter**, **OpenAI**,
+or an **open-source model on your own machine**
+([Arctic-Text2SQL-R1-7B](https://hf.co/Snowflake/Arctic-Text2SQL-R1-7B), or any
+model you've installed in Ollama). Pick the provider and the exact model per
+question in the UI. With your own key, the menu lists every model that key can use.
 
 **Execution accuracy** on 35 Chinook questions (see [Evaluation](#evaluation);
 `eval/compare.py --readme` regenerates this table):
@@ -67,7 +68,7 @@ question
 | Layer | Choice |
 | --- | --- |
 | Database | SQLite with the bundled [Chinook](https://github.com/lerocha/chinook-database) sample (Postgres supported via `ASKDB_DATABASE_URL`) |
-| LLM | A free model through any OpenAI-compatible API (default: Gemini free tier), Claude (`claude-opus-5-5`) through the Anthropic Python SDK, or [Arctic-Text2SQL-R1-7B](https://hf.co/Snowflake/Arctic-Text2SQL-R1-7B) (open, Apache-2.0) served by Ollama |
+| LLM | Claude (Opus 5.5 by default, plus Sonnet 5.5, Haiku 4.5 and Fable 5.1) through the Anthropic Python SDK; Gemini's free tier, Groq, OpenRouter and OpenAI through their OpenAI-compatible APIs; or [Arctic-Text2SQL-R1-7B](https://hf.co/Snowflake/Arctic-Text2SQL-R1-7B) (open, Apache-2.0) or another Ollama model |
 | DB access | SQLAlchemy |
 | SQL parsing | sqlglot |
 | API | FastAPI |
@@ -175,6 +176,17 @@ with each question; the backend uses it for that one request and never stores
 or logs it, so a public deployment doesn't spend the host's quota. A server key
 in `.env` is an optional fallback.
 
+**Model choice, without surprise bills.** The model menu comes from
+`GET /api/models` (`askdb/providers.py`). When the user's own key pays, Groq,
+OpenRouter, OpenAI and Gemini list every chat model that key can use, live from
+the provider. When the server's key pays, visitors can only pick the models the
+operator allowed (`ASKDB_*_MODELS`, by default just the default model), and the
+backend rejects anything else, so nobody can run an expensive model on the
+host's key. Claude models come from a fixed list, because the request options
+differ by model: Haiku 4.5, for example, takes neither adaptive thinking nor
+`effort`. Fable 5.1 costs 2.5× Opus, so it's only offered with the user's own
+key unless the operator adds it.
+
 **Self-correction.** Database errors (unknown column, bad join) *and*
 validation failures (syntax errors, blocked statements) are sent back to the
 model with the failed SQL, up to `ASKDB_MAX_RETRIES` (default 2) repairs.
@@ -228,8 +240,9 @@ at all.
 provider is a free hosted model: Google Gemini's free tier through its
 OpenAI-compatible endpoint (`askdb/hosted.py`). It gets the same prompt,
 few-shot examples, follow-up context, error feedback, and validation as Claude.
-Any OpenAI-compatible chat API works (Groq, OpenRouter, Hugging Face,
-LM Studio) by changing `ASKDB_FREE_BASE_URL` and `ASKDB_FREE_MODEL`. Free tiers
+Groq, OpenRouter and OpenAI are built-in providers too, and any other
+OpenAI-compatible chat API (Hugging Face, LM Studio) works by changing
+`ASKDB_FREE_BASE_URL` and `ASKDB_FREE_MODEL`. Free tiers
 have rate limits, and Google may use free-tier prompts to improve its products,
 so use Claude or the local model for private data.
 

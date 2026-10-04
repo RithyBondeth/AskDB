@@ -1,6 +1,7 @@
 // The user's own model API keys. They live only in this browser (localStorage) and
 // are sent with each question to the AskDB backend, which uses them for that one
 // request and never stores them.
+import { PROVIDERS } from "@/lib/providers";
 import type { Provider } from "@/lib/types";
 
 export type KeyProvider = Exclude<Provider, "local">;
@@ -13,8 +14,9 @@ export function loadKeys(): ApiKeys {
   try {
     const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}");
     const keys: ApiKeys = {};
-    for (const p of ["free", "claude"] as const) {
-      if (typeof raw[p] === "string" && raw[p].trim()) keys[p] = raw[p].trim();
+    for (const { id, key } of PROVIDERS) {
+      if (!key || id === "local") continue;
+      if (typeof raw[id] === "string" && raw[id].trim()) keys[id] = raw[id].trim();
     }
     return keys;
   } catch {

@@ -22,10 +22,13 @@ class Settings(BaseSettings):
     # Which generator answers by default: a free hosted model (the default, so
     # testing costs nothing), Claude, or an open model served locally. "auto" uses
     # Claude when Anthropic credentials are set, otherwise the free model.
-    provider: Literal["auto", "claude", "free", "local"] = "free"
+    provider: Literal["auto", "claude", "free", "groq", "openrouter", "openai", "local"] = "free"
 
     model: str = "claude-opus-5-5"
     effort: str = "medium"
+    # Claude models visitors may pick when the server's key pays. With their own
+    # key, users can pick any model in askdb.providers.CLAUDE_MODELS.
+    claude_models: list[str] = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-4-5"]
 
     # Free hosted model (provider="free"): any OpenAI-compatible chat API.
     # Default is Google Gemini's free tier (key: https://aistudio.google.com/apikey).
@@ -33,6 +36,25 @@ class Settings(BaseSettings):
     free_api_key: SecretStr | None = None
     free_model: str = "gemini-flash-latest"
     free_timeout_s: float = 120.0
+    # Models visitors may pick with the server's key (empty = only the default).
+    # With their own key, users can pick any model the provider lists for it.
+    free_models: list[str] = []
+
+    # More OpenAI-compatible providers, each with its own key and model choice.
+    groq_base_url: str = "https://api.groq.com/openai/v1"
+    groq_api_key: SecretStr | None = None
+    groq_model: str = "openai/gpt-oss-120b"
+    groq_models: list[str] = []
+
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    openrouter_api_key: SecretStr | None = None
+    openrouter_model: str = "openrouter/auto"
+    openrouter_models: list[str] = []
+
+    openai_base_url: str = "https://api.openai.com/v1"
+    openai_api_key: SecretStr | None = None
+    openai_model: str = "gpt-5-mini"
+    openai_models: list[str] = []
 
     # Open model (provider="local"). Defaults to Arctic-Text2SQL-R1-7B via Ollama.
     local_model: str = "hf.co/mradermacher/Arctic-Text2SQL-R1-7B-GGUF:Q4_K_M"
@@ -56,7 +78,14 @@ class Settings(BaseSettings):
     max_uploads: int = 20  # per browser
     max_total_uploads: int = 200  # across everyone: caps disk use on a public server
 
-    @field_validator("anthropic_api_key", "free_api_key", mode="before")
+    @field_validator(
+        "anthropic_api_key",
+        "free_api_key",
+        "groq_api_key",
+        "openrouter_api_key",
+        "openai_api_key",
+        mode="before",
+    )
     @classmethod
     def _blank_is_unset(cls, v: object) -> object:
         # `.env.example` ships with empty `KEY=` lines; treat those as not set.

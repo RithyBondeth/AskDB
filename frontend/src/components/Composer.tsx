@@ -1,20 +1,10 @@
 "use client";
 
-import { ArrowUp, Bot, CornerDownRight, Cpu, Gift, Square } from "lucide-react";
+import { ArrowUp, CornerDownRight, Square } from "lucide-react";
 import { type RefObject, useEffect } from "react";
 
-import type { Provider } from "@/lib/types";
-
-const PROVIDERS: { id: Provider; label: string; icon: typeof Bot; setup: string }[] = [
-  {
-    id: "free",
-    label: "Free",
-    icon: Gift,
-    setup: "Add a free Gemini key under API keys",
-  },
-  { id: "claude", label: "Claude", icon: Bot, setup: "Add an Anthropic key under API keys" },
-  { id: "local", label: "Open model", icon: Cpu, setup: "Runs on your machine with Ollama" },
-];
+import ModelPicker from "@/components/ModelPicker";
+import type { ModelsResponse, Provider } from "@/lib/types";
 
 export default function Composer({
   inputRef,
@@ -24,8 +14,12 @@ export default function Composer({
   onStop,
   provider,
   onProviderChange,
-  models,
+  model,
+  onModelChange,
+  modelList,
+  modelsLoading,
   configured,
+  onAddKey,
   busy,
   followUpTo,
   example,
@@ -37,8 +31,12 @@ export default function Composer({
   onStop: () => void;
   provider: Provider;
   onProviderChange: (p: Provider) => void;
-  models: Record<Provider, string> | null;
+  model: string | undefined;
+  onModelChange: (model: string) => void;
+  modelList: ModelsResponse | undefined;
+  modelsLoading: boolean;
   configured: Record<Provider, boolean> | null;
+  onAddKey: () => void;
   busy: boolean;
   followUpTo: string | null;
   example?: string;
@@ -86,45 +84,17 @@ export default function Composer({
         className="block w-full resize-none bg-transparent px-3 pt-2.5 pb-1 text-[17px] leading-relaxed outline-none placeholder:text-subtle"
       />
       <div className="flex flex-wrap items-center gap-2 px-1 pt-1">
-        <div
-          role="radiogroup"
-          aria-label="Model"
-          className="sketch-sm inline-flex bg-surface-2 p-0.5 text-[13px]"
-        >
-          {PROVIDERS.map(({ id, label, icon: Icon, setup }) => {
-            const ready = configured?.[id] ?? true;
-            return (
-              <button
-                key={id}
-                type="button"
-                role="radio"
-                aria-checked={provider === id}
-                disabled={busy}
-                onClick={() => onProviderChange(id)}
-                title={ready ? models?.[id] : `Not set up yet. ${setup}`}
-                className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 transition disabled:opacity-60 ${
-                  provider === id
-                    ? "bg-highlight font-medium text-[#1d1b19]"
-                    : "text-muted hover:text-foreground"
-                } ${ready ? "" : "line-through decoration-dotted opacity-60"}`}
-              >
-                <Icon className="size-3.5" />
-                {label}
-              </button>
-            );
-          })}
-        </div>
-        {configured && !configured[provider] ? (
-          <span className="max-w-[22rem] truncate text-[11px] text-danger">
-            Not set up: {PROVIDERS.find((p) => p.id === provider)?.setup}
-          </span>
-        ) : (
-          models && (
-            <span className="hidden max-w-[16rem] truncate font-mono text-[11px] text-subtle md:inline">
-              {models[provider].split("/").at(-1)}
-            </span>
-          )
-        )}
+        <ModelPicker
+          provider={provider}
+          onProviderChange={onProviderChange}
+          model={model}
+          onModelChange={onModelChange}
+          list={modelList}
+          loading={modelsLoading}
+          configured={configured}
+          disabled={busy}
+          onAddKey={onAddKey}
+        />
         <span className="ml-auto hidden text-[11px] text-subtle sm:inline">
           <kbd className="font-sans">↵</kbd> ask · <kbd className="font-sans">⇧↵</kbd> new line ·{" "}
           <kbd className="font-sans">⌘K</kbd> commands

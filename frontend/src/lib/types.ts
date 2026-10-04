@@ -1,7 +1,7 @@
 // Mirrors the response models in backend/api/main.py.
 
 export type Cell = string | number | boolean | null;
-export type Provider = "claude" | "free" | "local";
+export type Provider = "claude" | "free" | "groq" | "openrouter" | "openai" | "local";
 export type Stage = "generate" | "validate" | "execute";
 
 export interface Attempt {
@@ -104,6 +104,8 @@ export interface Turn {
   id: string;
   question: string;
   provider: Provider;
+  /** The model asked (undefined: the provider's default). */
+  model?: string;
   database: string;
   status: "running" | "done" | "error";
   progress: Progress;
@@ -112,4 +114,14 @@ export interface Turn {
   data?: AskResponse;
   original?: AskResponse; // the model's answer, kept when the user edits the SQL
   error?: AskError;
+}
+
+/** GET /api/models: what the model menu offers for one provider. */
+export interface ModelsResponse {
+  provider: Provider;
+  default: string;
+  models: { id: string; label: string; note?: string }[];
+  /** live: from the provider for your key; allowed: the server's list; catalog: AskDB's list. */
+  source: "live" | "allowed" | "catalog";
+  error: string | null;
 }

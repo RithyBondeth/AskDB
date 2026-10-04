@@ -1,44 +1,32 @@
 import { KeyRound, Terminal } from "lucide-react";
 
 import Doodle from "@/components/Doodle";
+import { providerInfo } from "@/lib/providers";
 import type { Provider } from "@/lib/types";
 
-const KEY_HELP: Partial<Record<Provider, { title: string; body: React.ReactNode }>> = {
-  free: {
-    title: "Add a free model key to start",
+/** What to say when the chosen provider has no key yet. */
+function keyHelp(provider: Provider): { title: string; body: React.ReactNode } | null {
+  const { label, key } = providerInfo(provider);
+  if (!key) return null;
+  const name = label.replace(/ \(.*\)/, "");
+  return {
+    title: key.free ? `Add a free ${name} key to start` : `Add your ${name} key to use ${name}`,
     body: (
       <>
-        Get a free Google Gemini key at{" "}
+        {key.free ? "Get a free key" : "Create a key"} at{" "}
         <a
-          href="https://aistudio.google.com/apikey"
+          href={key.url}
           target="_blank"
           rel="noreferrer"
           className="font-semibold text-accent-ink underline underline-offset-2"
         >
-          aistudio.google.com/apikey
+          {key.site}
         </a>{" "}
-        (no credit card), then paste it here. It stays in your browser.
+        and paste it here. It stays in your browser. Or pick another provider below.
       </>
     ),
-  },
-  claude: {
-    title: "Add your Anthropic key to use Claude",
-    body: (
-      <>
-        Create a key at{" "}
-        <a
-          href="https://platform.claude.com/"
-          target="_blank"
-          rel="noreferrer"
-          className="font-semibold text-accent-ink underline underline-offset-2"
-        >
-          platform.claude.com
-        </a>{" "}
-        and paste it here, or switch to the Free model below.
-      </>
-    ),
-  },
-};
+  };
+}
 
 /** First-run help on the home screen: the backend is down, or the chosen model has no key. */
 export default function SetupNotice({
@@ -62,7 +50,7 @@ export default function SetupNotice({
       </Notice>
     );
   }
-  const help = KEY_HELP[provider];
+  const help = keyHelp(provider);
   if (!help || configured?.[provider] !== false) return null;
   return (
     <Notice icon={KeyRound} title={help.title}>

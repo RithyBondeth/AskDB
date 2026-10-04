@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { askStream } from "@/lib/stream";
+import { askStream, fetchModels } from "@/lib/stream";
 import type { StreamEvent } from "@/lib/types";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -67,5 +67,25 @@ describe("askStream", () => {
   it("rejects when the stream ends without an answer", async () => {
     serve([": keepalive\n\n"], sse);
     await expect(askStream(opts())).rejects.toMatchObject({ message: /closed before/ });
+  });
+});
+
+describe("model choice", () => {
+  it("sends the chosen model with the question", async () => {
+    const fetch = serve([`data: ${JSON.stringify({ type: "result", data: result })}\n\n`], sse);
+    await askStream({ ...opts(), model: "llama-3" });
+    const init = (fetch.mock.calls[0] as unknown as [string, RequestInit])[1];
+    expect(JSON.parse(init.body as string)).toMatchObject({ provider: "free", model: "llama-3" });
+  });
+
+  it("asks for a provider's models with the user's key", async () => {
+    const body = { provider: "groq", default: "a", models: [], source: "live", error: null };
+    const fetch = serve([JSON.stringify(body)], {
+      headers: { "content-type": "application/json" },
+    });
+    await expect(fetchModels("groq", "gsk")).resolves.toEqual(body);
+    const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("/api/models?provider=groq");
+    expect(init.headers).toMatchObject({ "x-askdb-api-key": "gsk" });
   });
 });
