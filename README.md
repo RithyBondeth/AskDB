@@ -164,7 +164,10 @@ anything containing writes, DDL, `PRAGMA`, `ATTACH`, `SELECT INTO`, or
 `FOR UPDATE`. Separately, the database connection is opened read-only (SQLite
 `mode=ro`, Postgres `default_transaction_read_only`), so a statement the parser
 misses still can't change data. `tests/test_validate.py` and
-`tests/test_execute.py` check both layers.
+`tests/test_execute.py` check both layers. Read-only doesn't limit what a
+`SELECT` can *read*, so on Postgres connect as a dedicated low-privilege role
+([setup](docs/RUNNING.md#a-postgresql-role-for-askdb)): as a superuser, a query
+could read files on the database server.
 
 **Bring your own key.** Users paste a model key in the app instead of editing
 server files. It's kept in their browser's localStorage and sent as a header
@@ -284,6 +287,7 @@ backend/
 frontend/
   src/app/         page + API route handlers (proxy to the backend)
   src/components/  question box, attempts, table, chart, schema panel
+  src/lib/         helpers (streaming, formatting, keys), with Vitest tests beside them
 scripts/
   record_demo.py   records docs/demo.gif from the running app
 .github/workflows/
@@ -294,7 +298,7 @@ Before pushing, run what CI runs:
 
 ```bash
 cd backend && uv run ruff check . && uv run ruff format --check . && uv run pytest -q
-cd frontend && npm run lint && npm run typecheck && npm run build
+cd frontend && npm run lint && npm run typecheck && npm test && npm run build
 ```
 
 ## Credits

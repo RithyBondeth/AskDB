@@ -2,17 +2,28 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import queue
 import threading
-from collections.abc import Iterator
+from collections.abc import AsyncIterator
 from functools import lru_cache
 from typing import Annotated, Literal
 
 import anthropic
 import httpx
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -285,15 +296,39 @@ def ask(
     return to_response(ans, provider, db.model_name(provider))
 
 
+# While the model thinks, send an SSE comment this often so proxies and browsers
+# don't close a connection that looks idle.
+KEEPALIVE_S = 15.0
+
+
+class ClientGone(Exception):
+    """The client disconnected, so the answer is no longer wanted."""
+
+
 @app.post("/api/ask/stream")
 def ask_stream(
-    req: AskRequest, registry: Registry, api_key: UserKey = None, owner: Owner = None
+    req: AskRequest,
+    request: Request,
+    registry: Registry,
+    api_key: UserKey = None,
+    owner: Owner = None,
 ) -> StreamingResponse:
     """Same as /api/ask, as Server-Sent Events: progress events while the pipeline
-    runs, then one `result` or `error` event."""
+    runs, then one `result` or `error` event.
+
+    If the client disconnects, the pipeline stops at its next step, so a closed tab
+    doesn't keep spending model calls on repairs nobody will see.
+    """
     db = resolve(registry, req.database, owner)
     provider = req.provider or db.default_provider
     events: queue.Queue[dict | None] = queue.Queue()
+    gone = threading.Event()
+
+    def on_event(event: dict) -> None:
+        # Called before each pipeline step, including every model call.
+        if gone.is_set():
+            raise ClientGone
+        events.put(event)
 
     def work() -> None:
         try:
@@ -301,11 +336,13 @@ def ask_stream(
                 req.question.strip(),
                 provider=provider,
                 context=_context(req),
-                on_event=events.put,
+                on_event=on_event,
                 api_key=_key(api_key),
             )
             result = to_response(ans, provider, db.model_name(provider))
             events.put({"type": "result", "data": result.model_dump()})
+        except ClientGone:
+            log.info("Client disconnected; stopped answering %r", req.question[:80])
         except Exception as e:  # reported to the client as an event
             status, detail = error_detail(e)
             events.put({"type": "error", "status": status, "detail": detail.model_dump()})
@@ -314,9 +351,23 @@ def ask_stream(
 
     threading.Thread(target=work, daemon=True).start()
 
-    def stream() -> Iterator[str]:
-        while (event := events.get()) is not None:
-            yield f"data: {json.dumps(event, default=str)}\n\n"
+    async def stream() -> AsyncIterator[str]:
+        try:
+            while True:
+                try:
+                    event = await asyncio.to_thread(events.get, timeout=KEEPALIVE_S)
+                except queue.Empty:
+                    if await request.is_disconnected():
+                        return
+                    yield ": keepalive\n\n"
+                    continue
+                if event is None:
+                    return
+                yield f"data: {json.dumps(event, default=str)}\n\n"
+        finally:
+            # Runs when the stream ends for any reason, including the server
+            # cancelling it because the client went away.
+            gone.set()
 
     return StreamingResponse(
         stream(),
@@ -350,9 +401,11 @@ def check_key(req: KeyCheckRequest, api_key: UserKey = None) -> dict:
     settings = get_settings()
     try:
         if req.provider == "free":
-            list_models(settings.free_base_url, key, httpx.Client(timeout=15))
+            with httpx.Client(timeout=15) as client:
+                list_models(settings.free_base_url, key, client)
         else:
-            anthropic.Anthropic(api_key=key, max_retries=0, timeout=15).models.list(limit=1)
+            with anthropic.Anthropic(api_key=key, max_retries=0, timeout=15) as client:
+                client.models.list(limit=1)
     except httpx.HTTPStatusError as e:
         code = e.response.status_code
         bad = code in (400, 401, 403)

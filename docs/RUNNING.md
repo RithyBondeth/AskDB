@@ -395,8 +395,39 @@ Also:
 - Set `ASKDB_REFERENCE_DATE=` (empty) so relative dates use the real today.
 - Replace the Chinook examples in `backend/askdb/prompts.py` with a few
   question/SQL pairs for your own schema. This noticeably improves accuracy.
-- For PostgreSQL, use a database user that only has read access. AskDB already
-  opens the connection read-only, but a read-only user is a sensible extra layer.
+- For PostgreSQL, connect as a dedicated read-only role, never as `postgres`
+  or another superuser (see below).
+
+#### A PostgreSQL role for AskDB
+
+AskDB only runs single `SELECT` statements, in read-only transactions with a
+statement timeout. That stops writes, but a `SELECT` can still call functions,
+and what those functions may do depends on the role. Connected as a superuser,
+a validated `SELECT` can read files on the database server
+(`pg_read_file('/etc/passwd')`), list its directories (`pg_ls_dir`), read
+password hashes from `pg_authid`, and stop other sessions
+(`pg_terminate_backend`).
+
+Create a role that can only read the tables you want to ask about. Run this as
+an admin, changing the database, schema and password:
+
+```sql
+CREATE ROLE askdb_reader LOGIN PASSWORD 'change-me';
+GRANT CONNECT ON DATABASE mydb TO askdb_reader;
+GRANT USAGE ON SCHEMA public TO askdb_reader;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO askdb_reader;
+-- Tables created later in this schema are readable too:
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO askdb_reader;
+-- Read-only even if something connects without AskDB's settings:
+ALTER ROLE askdb_reader SET default_transaction_read_only = on;
+```
+
+Then use `postgresql+psycopg://askdb_reader:change-me@host:5432/mydb`. As this
+role the file, directory, password-hash and large-object functions above fail
+with "permission denied", and only the granted tables can be read. To hide
+sensitive tables or columns from the model, grant `SELECT` on just the ones you
+want, or on views. Don't give the role `pg_read_server_files`,
+`pg_read_all_data`, `pg_signal_backend`, or membership in an admin role.
 
 The open model is trained on SQLite, so expect it to do better on SQLite
 databases than on PostgreSQL.

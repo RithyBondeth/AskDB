@@ -13,6 +13,9 @@ export async function POST(request: Request) {
       headers: withClientHeaders(request, { "content-type": "application/json" }),
       body: await request.text(),
       cache: "no-store",
+      // When the browser hangs up (Stop, new chat, closed tab), hang up on the
+      // backend too, so it stops calling the model.
+      signal: request.signal,
     });
     return new Response(res.body, {
       status: res.status,

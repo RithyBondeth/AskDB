@@ -181,3 +181,63 @@ def test_key_check(db_path, scripted, monkeypatch):
 def test_root_points_to_the_web_app(db_path, scripted):
     res = make_client(db_path, scripted("SELECT 1")).get("/")
     assert res.status_code == 200 and "localhost:3000" in res.json()["message"]
+
+
+class SlowGenerator:
+    """Waits for `release` before each answer and always returns broken SQL, so the
+    pipeline would keep asking for repairs."""
+
+    def __init__(self):
+        import threading
+
+        self.release = threading.Event()
+        self.calls = 0
+        self.context = None
+
+    def generate(self, question, repairs=None):
+        from askdb.generate import Generation
+
+        self.calls += 1
+        self.release.wait(5)
+        return Generation(sql="SELECT nope FROM customer", explanation="")
+
+
+def test_stream_sends_keepalives_while_waiting(db_path, scripted, monkeypatch):
+    monkeypatch.setattr(api.main, "KEEPALIVE_S", 0.05)
+    gen = SlowGenerator()
+    client = make_client(db_path, gen)
+    import threading
+
+    threading.Timer(0.3, gen.release.set).start()
+    res = client.post("/api/ask/stream", json={"question": "names"})
+    assert ": keepalive" in res.text
+    assert parse_sse(res.text)[-1]["type"] == "error"  # the stream still finishes
+
+
+def test_stream_stops_asking_the_model_after_disconnect(db_path):
+    """Needs a real server: the test client doesn't report disconnects."""
+    import threading
+    import time
+
+    import uvicorn
+
+    gen = SlowGenerator()
+    make_client(db_path, gen)  # installs the registry override
+    server = uvicorn.Server(uvicorn.Config(app, port=0, log_level="warning"))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    try:
+        while not server.started:
+            time.sleep(0.01)
+        port = server.servers[0].sockets[0].getsockname()[1]
+        url = f"http://127.0.0.1:{port}/api/ask/stream"
+        with httpx.stream("POST", url, json={"question": "names"}, timeout=5) as res:
+            next(res.iter_lines())  # first progress event, then hang up
+        time.sleep(0.3)  # let the server notice
+        gen.release.set()
+        time.sleep(0.5)
+        # Without the disconnect check this would be 3 calls (first try + 2 repairs).
+        assert gen.calls == 1
+    finally:
+        server.should_exit = True
+        thread.join(5)
