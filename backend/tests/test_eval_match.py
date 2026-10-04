@@ -25,3 +25,25 @@ def test_nulls_and_float_drift():
 def test_different_values_fail():
     assert not results_match([["x"]], [["y"]], ordered=False)
     assert not results_match([["x"]], [["x"], ["y"]], ordered=False)
+
+
+def test_every_gold_query_runs_on_chinook():
+    from run_eval import COMPARE_LIMIT, load_dataset
+
+    from askdb.config import BACKEND_DIR
+    from askdb.db import make_engine, run_query
+
+    engine = make_engine(f"sqlite:///{BACKEND_DIR / 'data' / 'chinook.sqlite'}", timeout_s=10)
+    rows = load_dataset()
+    assert len({r["id"] for r in rows}) == len(rows), "duplicate ids"
+    for row in rows:
+        assert run_query(engine, row["gold_sql"], COMPARE_LIMIT).rows, row["id"]
+
+
+def test_compare_updates_only_the_readme_table(tmp_path):
+    from compare import END, START, update_readme
+
+    readme = tmp_path / "README.md"
+    readme.write_text(f"intro\n{START}\nold table\n{END}\noutro\n")
+    update_readme(["| new |"], readme)
+    assert readme.read_text() == f"intro\n{START}\n| new |\n{END}\noutro\n"

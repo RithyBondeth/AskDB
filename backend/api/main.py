@@ -24,7 +24,7 @@ from askdb.hosted import list_models
 from askdb.importers import UploadError
 from askdb.pipeline import AskDB, Provider
 from askdb.present import pick_chart, to_json_value
-from askdb.sources import SourceRegistry
+from askdb.sources import SourceRegistry, valid_owner
 
 log = logging.getLogger("askdb.api")
 
@@ -32,7 +32,7 @@ app = FastAPI(title="AskDB API", version="0.2.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=get_settings().cors_origins,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["*"],
 )
 
@@ -49,14 +49,19 @@ Registry = Annotated[SourceRegistry, Depends(get_registry)]
 UserKey = Annotated[str | None, Header(alias="X-AskDB-Api-Key", max_length=512)]
 
 
+# A random id the browser keeps in localStorage. Uploads belong to the id that
+# made them, so one visitor can't see or delete another's databases.
+Owner = Annotated[str | None, Header(alias="X-AskDB-Owner", max_length=128)]
+
+
 def _key(value: str | None) -> str | None:
     return value.strip() or None if value else None
 
 
-def resolve(registry: SourceRegistry, database: str | None) -> AskDB:
+def resolve(registry: SourceRegistry, database: str | None, owner: str | None) -> AskDB:
     """The pipeline for a database id (None or "sample" = the configured database)."""
     try:
-        return registry.get(database)
+        return registry.get(database, owner)
     except KeyError:
         raise HTTPException(
             404, ErrorDetail(message="That database no longer exists.").model_dump()
@@ -185,8 +190,8 @@ def root() -> dict:
 
 
 @app.get("/api/health")
-def health(registry: Registry, database: str | None = Query(None)) -> dict:
-    db = resolve(registry, database)
+def health(registry: Registry, owner: Owner = None, database: str | None = Query(None)) -> dict:
+    db = resolve(registry, database, owner)
     return {
         "status": "ok",
         "dialect": db.schema.dialect,
@@ -198,16 +203,16 @@ def health(registry: Registry, database: str | None = Query(None)) -> dict:
 
 
 @app.get("/api/schema")
-def schema(registry: Registry, database: str | None = Query(None)) -> dict:
-    db = resolve(registry, database)
-    return db.schema.to_dict() | {"suggestions": registry.suggestions(database)}
+def schema(registry: Registry, owner: Owner = None, database: str | None = Query(None)) -> dict:
+    db = resolve(registry, database, owner)
+    return db.schema.to_dict() | {"suggestions": registry.suggestions(database, owner)}
 
 
 @app.get("/api/databases")
-def list_databases(registry: Registry) -> dict:
+def list_databases(registry: Registry, owner: Owner = None) -> dict:
     s = registry.settings
     return {
-        "databases": [info.to_dict() for info in registry.list()],
+        "databases": [info.to_dict() for info in registry.list(owner)],
         "allow_uploads": s.allow_uploads,
         "max_upload_mb": s.max_upload_mb,
     }
@@ -218,8 +223,18 @@ async def upload_database(
     registry: Registry,
     files: Annotated[list[UploadFile], File(description="One SQLite file, or CSV files")],
     name: Annotated[str | None, Form(max_length=80)] = None,
+    owner: Owner = None,
 ) -> dict:
-    """Create a queryable database from an uploaded SQLite file or CSV files."""
+    """Create a queryable database from an uploaded SQLite file or CSV files.
+    Only the uploading browser (its X-AskDB-Owner id) can see it."""
+    if not valid_owner(owner):
+        raise HTTPException(
+            400,
+            ErrorDetail(
+                message="Your browser didn't send an id, so the upload couldn't be saved "
+                "as yours. Reload the page and try again."
+            ).model_dump(),
+        )
     limit = registry.settings.max_upload_mb * 1024 * 1024
     loaded: list[tuple[str, bytes]] = []
     total = 0
@@ -235,16 +250,16 @@ async def upload_database(
             )
         loaded.append((f.filename or "upload", data))
     try:
-        info = registry.add(loaded, name)
+        info = registry.add(loaded, name, owner)
     except UploadError as e:
         raise HTTPException(400, ErrorDetail(message=str(e)).model_dump()) from e
     return info.to_dict()
 
 
 @app.delete("/api/databases/{database}")
-def delete_database(database: str, registry: Registry) -> dict:
+def delete_database(database: str, registry: Registry, owner: Owner = None) -> dict:
     try:
-        registry.delete(database)
+        registry.delete(database, owner)
     except KeyError:
         raise HTTPException(404, ErrorDetail(message="No such database.").model_dump()) from None
     except UploadError as e:
@@ -253,10 +268,12 @@ def delete_database(database: str, registry: Registry) -> dict:
 
 
 @app.post("/api/ask", response_model=AskResponse, responses={422: {"model": ErrorDetail}})
-def ask(req: AskRequest, registry: Registry, api_key: UserKey = None) -> AskResponse:
+def ask(
+    req: AskRequest, registry: Registry, api_key: UserKey = None, owner: Owner = None
+) -> AskResponse:
     # Sync endpoint: FastAPI runs it in a worker thread, so the blocking SDK
     # and DB calls don't stall the event loop.
-    db = resolve(registry, req.database)
+    db = resolve(registry, req.database, owner)
     provider = req.provider or db.default_provider
     try:
         ans = db.ask(
@@ -269,10 +286,12 @@ def ask(req: AskRequest, registry: Registry, api_key: UserKey = None) -> AskResp
 
 
 @app.post("/api/ask/stream")
-def ask_stream(req: AskRequest, registry: Registry, api_key: UserKey = None) -> StreamingResponse:
+def ask_stream(
+    req: AskRequest, registry: Registry, api_key: UserKey = None, owner: Owner = None
+) -> StreamingResponse:
     """Same as /api/ask, as Server-Sent Events: progress events while the pipeline
     runs, then one `result` or `error` event."""
-    db = resolve(registry, req.database)
+    db = resolve(registry, req.database, owner)
     provider = req.provider or db.default_provider
     events: queue.Queue[dict | None] = queue.Queue()
 
@@ -307,9 +326,9 @@ def ask_stream(req: AskRequest, registry: Registry, api_key: UserKey = None) -> 
 
 
 @app.post("/api/run", response_model=AskResponse, responses={422: {"model": ErrorDetail}})
-def run(req: RunRequest, registry: Registry) -> AskResponse:
+def run(req: RunRequest, registry: Registry, owner: Owner = None) -> AskResponse:
     """Run SQL the user edited. Same read-only validation and connection."""
-    db = resolve(registry, req.database)
+    db = resolve(registry, req.database, owner)
     try:
         ans = db.run(req.sql)
     except Exception as e:

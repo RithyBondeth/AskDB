@@ -1,10 +1,13 @@
 # AskDB
 
+[![CI](https://github.com/RithyBondeth/AskDB/actions/workflows/ci.yml/badge.svg)](https://github.com/RithyBondeth/AskDB/actions/workflows/ci.yml)
+
 **Ask your database questions in plain English.** AskDB turns a question into
 validated, read-only SQL, runs it, fixes its own mistakes when the database
 returns an error, and answers with a table and an automatically chosen chart.
 
-> Demo GIF goes here: question → answer → self-correction.
+<!-- Demo GIF: start the app with a model key, run `uv run scripts/record_demo.py`
+     from the repo root, then replace this comment with ![AskDB demo](docs/demo.gif) -->
 
 **Features:** upload your own data (SQLite or CSV) · follow-up questions in a chat thread · live pipeline progress
 (streamed) · self-correction you can inspect · edit and re-run the SQL ·
@@ -17,13 +20,16 @@ OpenAI-compatible API such as Groq or OpenRouter), **Claude**, or an
 ([Arctic-Text2SQL-R1-7B](https://hf.co/Snowflake/Arctic-Text2SQL-R1-7B) via
 Ollama). Switch between them per question in the UI.
 
-**Execution accuracy:** _not measured yet_. See [Evaluation](#evaluation).
+**Execution accuracy** on 35 Chinook questions (see [Evaluation](#evaluation);
+`eval/compare.py --readme` regenerates this table):
 
-| Model | Execution accuracy | Fixed by self-correction | Median s/question |
-| --- | --- | --- | --- |
-| `gemini-flash-latest` (free) | _run the eval_ | | |
-| `claude-opus-5-5` | _run the eval_ | | |
-| `Arctic-Text2SQL-R1-7B` (Q4_K_M, local) | _run the eval_ | | |
+<!-- eval-table:start -->
+| Model | Provider | Execution accuracy | Fixed by self-correction | Median s/question |
+| --- | --- | --- | --- | --- |
+| `gemini-flash-latest` | free | _not measured yet_ | | |
+| `claude-opus-5-5` | claude | _not measured yet_ | | |
+| `Arctic-Text2SQL-R1-7B` (Q4_K_M) | local | _not measured yet_ | | |
+<!-- eval-table:end -->
 
 ## How it works
 
@@ -202,8 +208,18 @@ AskDB creates itself, with column types inferred and names converted to
 named in a malicious schema don't run, and is opened read-only. Size and count
 limits apply. Database ids are checked against a strict pattern, so they can't
 be used to reach other files. Uploads get no Chinook few-shot examples, and
-"today" is the real date. There are no user accounts, so every user of a
-server sees every upload: set `ASKDB_ALLOW_UPLOADS=false` on a public demo.
+"today" is the real date.
+
+**Uploads are private to the browser that made them.** There are no accounts:
+the browser generates a random id, keeps it in `localStorage`, and sends it with
+every request. Each upload is saved under a hash of that id, and any other id
+gets a 404 for it, the same as for a database that doesn't exist. Each browser
+may keep `ASKDB_MAX_UPLOADS` uploads, and `ASKDB_MAX_TOTAL_UPLOADS` caps the
+server's total disk use. This is isolation, not authentication: anyone who
+copies the id from a browser gets that browser's uploads, and clearing site data
+loses access. Uploads made before this change have no owner and stay visible to
+everyone. Set `ASKDB_ALLOW_UPLOADS=false` if a public demo shouldn't store files
+at all.
 
 **Free model by default.** Testing shouldn't cost money, so the default
 provider is a free hosted model: Google Gemini's free tier through its
@@ -241,17 +257,18 @@ predicted query returns the same rows as the gold query:
 ```bash
 cd backend
 uv run python eval/run_eval.py --limit 5                                   # smoke run
-uv run python eval/run_eval.py --out eval/results/gemini-free.json
+uv run python eval/run_eval.py --delay 5 --out eval/results/gemini-free.json
 uv run python eval/run_eval.py --provider claude --out eval/results/claude-opus-5-5.json
 uv run python eval/run_eval.py --provider local --out eval/results/arctic-7b-q4.json
-uv run python eval/compare.py      # Markdown table for the README + questions where they differ
+uv run python eval/compare.py --readme   # table into README.md + questions where they differ
 ```
 
 Free-model runs are limited by the provider's rate limits (Gemini's free tier
-allows a few requests per minute, so a full run takes a while). Claude runs make
+allows a few requests per minute, so a full run takes a while): `--delay` spaces
+the questions out, and a rate-limited question waits a minute and is asked again
+rather than counted as wrong. Claude runs make
 real paid API calls. Local runs are free but slower. Commit the
-results files to track accuracy across prompt and model changes. The dataset has 15 items and the target is
-30–50.
+results files to track accuracy across prompt and model changes. The dataset has 35 items.
 
 ## Project layout
 
@@ -267,6 +284,17 @@ backend/
 frontend/
   src/app/         page + API route handlers (proxy to the backend)
   src/components/  question box, attempts, table, chart, schema panel
+scripts/
+  record_demo.py   records docs/demo.gif from the running app
+.github/workflows/
+  ci.yml           lint, format, tests, typecheck, and build on every push and PR
+```
+
+Before pushing, run what CI runs:
+
+```bash
+cd backend && uv run ruff check . && uv run ruff format --check . && uv run pytest -q
+cd frontend && npm run lint && npm run typecheck && npm run build
 ```
 
 ## Credits

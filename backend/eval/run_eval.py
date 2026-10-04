@@ -4,6 +4,7 @@
     uv run python eval/run_eval.py --limit 5             # quick smoke run
     uv run python eval/run_eval.py --provider local      # open model via Ollama
     uv run python eval/run_eval.py --out eval/results/claude-v1.json
+    uv run python eval/run_eval.py --delay 5             # pace requests (free-tier limits)
 
 With Claude, each question costs an API call (plus repairs). With the local open
 model it is free but slower, depending on your hardware.
@@ -27,6 +28,18 @@ from askdb.pipeline import AskDB
 DATASET = Path(__file__).with_name("dataset.jsonl")
 # Gold queries can return more rows than the app shows; compare in full.
 COMPARE_LIMIT = 100_000
+# A rate-limited question says nothing about accuracy, so wait and ask again
+# rather than score it as wrong.
+RATE_LIMIT_WAIT_S = 60
+RATE_LIMIT_RETRIES = 3
+
+
+def load_dataset() -> list[dict]:
+    return [json.loads(line) for line in DATASET.read_text().splitlines() if line.strip()]
+
+
+def is_rate_limited(e: Exception) -> bool:
+    return isinstance(e, GenerationError) and "rate limit" in str(e).lower()
 
 
 def _norm(v: Any) -> Any:
@@ -84,21 +97,38 @@ def main() -> int:
         default=None,
         help="override ASKDB_PROVIDER",
     )
+    parser.add_argument(
+        "--delay",
+        type=float,
+        default=0.0,
+        help="seconds to wait between questions (free tiers allow a few requests a minute)",
+    )
     args = parser.parse_args()
 
-    rows = [json.loads(line) for line in DATASET.read_text().splitlines() if line.strip()]
+    rows = load_dataset()
     rows = rows[: args.limit] if args.limit else rows
     db = AskDB.from_settings()
     provider = args.provider or db.default_provider
     print(f"Provider: {provider} ({db.model_name(provider)})\n")
 
     results, hits, self_corrected = [], 0, 0
-    for row in rows:
+    for i, row in enumerate(rows):
+        if i and args.delay:
+            time.sleep(args.delay)
         started = time.monotonic()
         gold = run_query(db.engine, row["gold_sql"], COMPARE_LIMIT).rows
         record: dict[str, Any] = {"id": row["id"], "question": row["question"]}
         try:
-            ans = db.ask(row["question"], provider=provider)
+            for retry in range(RATE_LIMIT_RETRIES + 1):
+                try:
+                    ans = db.ask(row["question"], provider=provider)
+                    break
+                except GenerationError as e:
+                    if not is_rate_limited(e) or retry == RATE_LIMIT_RETRIES:
+                        raise
+                    print(f"      rate limited; waiting {RATE_LIMIT_WAIT_S}s")
+                    time.sleep(RATE_LIMIT_WAIT_S)
+                    started += RATE_LIMIT_WAIT_S  # don't count the wait as answer time
             pred = run_query(db.engine, ans.sql, COMPARE_LIMIT).rows
             ok = results_match(pred, gold, ordered=row.get("ordered", False))
             record.update(sql=ans.sql, attempts=len(ans.attempts), match=ok)

@@ -13,3 +13,23 @@
 {"id": "avg-track-length-rock", "question": "What is the average length in seconds of Rock tracks?", "gold_sql": "SELECT AVG(t.Milliseconds) / 1000.0 FROM Track t JOIN Genre g ON g.GenreId = t.GenreId WHERE g.Name = 'Rock'"}
 {"id": "customers-no-company", "question": "How many customers do not have a company listed?", "gold_sql": "SELECT COUNT(*) FROM Customer WHERE Company IS NULL"}
 {"id": "last-quarter-revenue", "question": "What was our revenue last quarter?", "gold_sql": "SELECT SUM(Total) FROM Invoice WHERE InvoiceDate >= '2013-07-01' AND InvoiceDate < '2013-10-01'"}
+{"id": "tracks-count", "question": "How many tracks are there?", "gold_sql": "SELECT COUNT(*) FROM Track"}
+{"id": "albums-by-ac-dc", "question": "List the titles of all albums by AC/DC", "gold_sql": "SELECT al.Title FROM Album al JOIN Artist ar ON ar.ArtistId = al.ArtistId WHERE ar.Name = 'AC/DC'"}
+{"id": "customers-by-country", "question": "How many customers are there in each country?", "gold_sql": "SELECT Country, COUNT(*) FROM Customer GROUP BY Country"}
+{"id": "usa-customers", "question": "List the first and last names of customers from the USA", "gold_sql": "SELECT FirstName, LastName FROM Customer WHERE Country = 'USA'"}
+{"id": "invoice-count-2010", "question": "How many invoices were issued in 2010?", "gold_sql": "SELECT COUNT(*) FROM Invoice WHERE strftime('%Y', InvoiceDate) = '2010'"}
+{"id": "avg-invoice-total", "question": "What is the average invoice total?", "gold_sql": "SELECT AVG(Total) FROM Invoice"}
+{"id": "largest-invoice", "question": "What is the largest single invoice total?", "gold_sql": "SELECT MAX(Total) FROM Invoice"}
+{"id": "revenue-by-genre-top3", "question": "Which 3 genres earned the most revenue, from most to least?", "gold_sql": "SELECT g.Name, SUM(il.UnitPrice * il.Quantity) AS revenue FROM InvoiceLine il JOIN Track t ON t.TrackId = il.TrackId JOIN Genre g ON g.GenreId = t.GenreId GROUP BY g.GenreId ORDER BY revenue DESC LIMIT 3", "ordered": true}
+{"id": "tracks-per-media-type", "question": "How many tracks are there for each media type?", "gold_sql": "SELECT m.Name, COUNT(*) FROM Track t JOIN MediaType m ON m.MediaTypeId = t.MediaTypeId GROUP BY m.MediaTypeId"}
+{"id": "employee-managers", "question": "List each employee's full name with the full name of the person they report to", "gold_sql": "SELECT e.FirstName, e.LastName, m.FirstName, m.LastName FROM Employee e JOIN Employee m ON m.EmployeeId = e.ReportsTo"}
+{"id": "top-employee-no-manager", "question": "Which employee does not report to anyone?", "gold_sql": "SELECT FirstName, LastName FROM Employee WHERE ReportsTo IS NULL"}
+{"id": "albums-over-20-tracks", "question": "Which albums have more than 20 tracks?", "gold_sql": "SELECT al.Title FROM Album al JOIN Track t ON t.AlbumId = al.AlbumId GROUP BY al.AlbumId HAVING COUNT(*) > 20"}
+{"id": "artists-no-albums", "question": "How many artists have no albums?", "gold_sql": "SELECT COUNT(*) FROM Artist ar WHERE NOT EXISTS (SELECT 1 FROM Album al WHERE al.ArtistId = ar.ArtistId)"}
+{"id": "never-sold-tracks", "question": "How many tracks have never been purchased?", "gold_sql": "SELECT COUNT(*) FROM Track t WHERE NOT EXISTS (SELECT 1 FROM InvoiceLine il WHERE il.TrackId = t.TrackId)"}
+{"id": "playlist-sizes", "question": "How many tracks does each playlist have? Include playlists with no tracks.", "gold_sql": "SELECT p.Name, COUNT(pt.TrackId) FROM Playlist p LEFT JOIN PlaylistTrack pt ON pt.PlaylistId = p.PlaylistId GROUP BY p.PlaylistId"}
+{"id": "monthly-revenue-2012", "question": "Total revenue per month in 2012, in calendar order", "gold_sql": "SELECT strftime('%m', InvoiceDate) AS month, SUM(Total) FROM Invoice WHERE strftime('%Y', InvoiceDate) = '2012' GROUP BY month ORDER BY month", "ordered": true}
+{"id": "top-cities-by-revenue", "question": "Which 3 billing cities generated the most revenue?", "gold_sql": "SELECT BillingCity, SUM(Total) AS revenue FROM Invoice GROUP BY BillingCity ORDER BY revenue DESC LIMIT 3"}
+{"id": "composer-most-tracks", "question": "Which composer has written the most tracks?", "gold_sql": "SELECT Composer FROM Track WHERE Composer IS NOT NULL GROUP BY Composer ORDER BY COUNT(*) DESC LIMIT 1"}
+{"id": "countries-over-100", "question": "Which billing countries have total revenue over 100?", "gold_sql": "SELECT BillingCountry FROM Invoice GROUP BY BillingCountry HAVING SUM(Total) > 100"}
+{"id": "customers-per-rep", "question": "How many customers does each sales support agent look after? Give the agent's first and last name.", "gold_sql": "SELECT e.FirstName, e.LastName, COUNT(*) FROM Customer c JOIN Employee e ON e.EmployeeId = c.SupportRepId GROUP BY e.EmployeeId"}

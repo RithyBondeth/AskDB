@@ -1,4 +1,4 @@
-import { withUserKey } from "@/lib/backend";
+import { withClientHeaders } from "@/lib/backend";
 
 const BACKEND_URL = process.env.ASKDB_API_URL ?? "http://127.0.0.1:8000";
 
@@ -10,7 +10,7 @@ export async function POST(request: Request) {
   try {
     const res = await fetch(`${BACKEND_URL}/api/ask/stream`, {
       method: "POST",
-      headers: withUserKey(request, { "content-type": "application/json" }),
+      headers: withClientHeaders(request, { "content-type": "application/json" }),
       body: await request.text(),
       cache: "no-store",
     });

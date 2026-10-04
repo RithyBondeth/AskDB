@@ -15,6 +15,7 @@ import Sidebar, { SidebarDrawer } from "@/components/Sidebar";
 import TurnView from "@/components/TurnView";
 import UploadDialog from "@/components/UploadDialog";
 import { type ApiKeys, keyFor, loadKeys, saveKeys } from "@/lib/keys";
+import { ownerHeaders } from "@/lib/owner";
 import { askStream, deleteDatabase, runSql } from "@/lib/stream";
 import { getTheme, nextTheme, setTheme } from "@/lib/theme";
 import type {
@@ -217,7 +218,7 @@ export default function AskApp() {
 
   const refreshDatabases = useCallback(async (): Promise<DatabaseInfo[]> => {
     try {
-      const res = await fetch("/api/databases");
+      const res = await fetch("/api/databases", { headers: ownerHeaders() });
       if (!res.ok) return [];
       const body = (await res.json()) as DatabasesResponse;
       setDatabases(body.databases);
@@ -247,7 +248,7 @@ export default function AskApp() {
     setHistory(loadHistory(database));
     setSchema(null);
     setSchemaFailed(false);
-    fetch(`/api/schema?database=${encodeURIComponent(database)}`)
+    fetch(`/api/schema?database=${encodeURIComponent(database)}`, { headers: ownerHeaders() })
       .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
       .then((s: SchemaResponse) => !cancelled && setSchema(s))
       .catch((status) => {
@@ -275,7 +276,7 @@ export default function AskApp() {
       const list = await refreshDatabases();
       if (list.some((d) => d.id === initialDb)) selectDatabase(initialDb);
       try {
-        const res = await fetch("/api/health");
+        const res = await fetch("/api/health", { headers: ownerHeaders() });
         if (!res.ok) throw new Error();
         const h = (await res.json()) as HealthResponse;
         setHealth(h);
