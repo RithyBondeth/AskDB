@@ -1,4 +1,5 @@
 import { KEY_HEADER } from "@/lib/keys";
+import { ownerHeaders } from "@/lib/owner";
 import type { AskError, AskResponse, DatabaseInfo, Provider, StreamEvent } from "@/lib/types";
 
 export interface AskOptions {
@@ -27,7 +28,10 @@ export async function askStream({
   try {
     res = await fetch("/api/ask/stream", {
       method: "POST",
-      headers: { "content-type": "application/json", ...(apiKey ? { [KEY_HEADER]: apiKey } : {}) },
+      headers: ownerHeaders({
+        "content-type": "application/json",
+        ...(apiKey ? { [KEY_HEADER]: apiKey } : {}),
+      }),
       body: JSON.stringify({ question, provider, context, database }),
       signal,
     });
@@ -67,7 +71,7 @@ export async function runSql(sql: string, database: string): Promise<AskResponse
   try {
     res = await fetch("/api/run", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: ownerHeaders({ "content-type": "application/json" }),
       body: JSON.stringify({ sql, database }),
     });
   } catch {
@@ -90,6 +94,7 @@ export function uploadDatabase(
     // XHR rather than fetch: it reports upload progress.
     const xhr = new XMLHttpRequest();
     xhr.open("POST", "/api/databases");
+    for (const [name, value] of Object.entries(ownerHeaders())) xhr.setRequestHeader(name, value);
     xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(e.loaded / e.total);
     xhr.onerror = () => reject({ message: "Network error during upload.", attempts: [] });
     xhr.onload = () => {
@@ -108,7 +113,10 @@ export function uploadDatabase(
 }
 
 export async function deleteDatabase(id: string): Promise<void> {
-  const res = await fetch(`/api/databases/${encodeURIComponent(id)}`, { method: "DELETE" });
+  const res = await fetch(`/api/databases/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: ownerHeaders(),
+  });
   if (!res.ok) throw await errorFrom(res);
 }
 

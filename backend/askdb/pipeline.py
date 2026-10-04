@@ -165,7 +165,9 @@ class AskDB:
             system,
             model=self.settings.model,
             effort=self.settings.effort,
-            client=anthropic.Anthropic(api_key=api_key) if api_key else self.client,
+            # The user's own key gets a client for this request only.
+            client=None if api_key else self.client,
+            api_key=api_key,
             context=context,
         )
 
@@ -178,15 +180,22 @@ class AskDB:
         on_event: EventHandler | None = None,
         api_key: str | None = None,
     ) -> Answer:
-        return answer(
-            question,
-            generator or self.generator_for(question, provider, context, api_key),
-            self.engine,
-            self.schema.dialect,
-            max_retries=self.settings.max_retries,
-            row_limit=self.settings.row_limit,
-            on_event=on_event,
-        )
+        own = generator is None
+        gen = generator or self.generator_for(question, provider, context, api_key)
+        try:
+            return answer(
+                question,
+                gen,
+                self.engine,
+                self.schema.dialect,
+                max_retries=self.settings.max_retries,
+                row_limit=self.settings.row_limit,
+                on_event=on_event,
+            )
+        finally:
+            # Generators are built per question; release their HTTP connections.
+            if own and (close := getattr(gen, "close", None)):
+                close()
 
     def run(self, sql: str) -> Answer:
         return run_sql(sql, self.engine, self.schema.dialect, self.settings.row_limit)

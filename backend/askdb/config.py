@@ -47,12 +47,14 @@ class Settings(BaseSettings):
     reference_date: str | None = "2013-12-31"
     cors_origins: list[str] = ["http://localhost:3000"]
 
-    # Uploaded databases (SQLite files or CSVs). Turn off for public deployments:
-    # there are no user accounts, so everyone using the app sees every upload.
+    # Uploaded databases (SQLite files or CSVs). Each upload belongs to the browser
+    # that made it (a random id kept in localStorage, not an account), so other
+    # visitors can't see, query, or delete it.
     allow_uploads: bool = True
     upload_dir: Path = BACKEND_DIR / "data" / "uploads"
     max_upload_mb: int = 50
-    max_uploads: int = 20
+    max_uploads: int = 20  # per browser
+    max_total_uploads: int = 200  # across everyone: caps disk use on a public server
 
     @field_validator("anthropic_api_key", "free_api_key", mode="before")
     @classmethod

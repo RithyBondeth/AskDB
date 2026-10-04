@@ -30,11 +30,22 @@ def registry(db_path, tmp_path):
     )
 
 
+# Each browser sends its own random id; uploads belong to the id that made them.
+ME = "browser-me-0123456789"
+OTHER = "browser-other-0123456789"
+
+
 @pytest.fixture
 def client(registry):
     app.dependency_overrides[get_registry] = lambda: registry
-    yield TestClient(app)
+    yield TestClient(app, headers={"X-AskDB-Owner": ME})
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def other(registry, client):
+    """A second browser using the same server."""
+    return TestClient(app, headers={"X-AskDB-Owner": OTHER})
 
 
 def upload(client, *files, name=None):
@@ -108,7 +119,7 @@ def test_upload_csvs_then_query(client, registry):
 
 def test_ask_uses_the_chosen_database(client, registry, scripted):
     info = upload(client, ("sales.csv", SALES_CSV)).json()
-    db = registry.get(info["id"])
+    db = registry.get(info["id"], ME)
     db.generator_for = lambda q, provider=None, context=None, api_key=None: scripted(
         "SELECT COUNT(*) FROM sales"
     )
@@ -137,7 +148,7 @@ def test_uploaded_database_is_read_only(client, registry):
     assert blocked.status_code == 422
     # and even bypassing the validator, the connection refuses to write
     with pytest.raises(QueryError, match="readonly"):
-        run_query(registry.get(info["id"]).engine, "DELETE FROM sales", 10)
+        run_query(registry.get(info["id"], ME).engine, "DELETE FROM sales", 10)
 
 
 def test_rejects_fake_sqlite(client):
@@ -168,7 +179,7 @@ def test_uploads_can_be_turned_off(db_path, tmp_path):
     )
     app.dependency_overrides[get_registry] = lambda: registry
     try:
-        res = upload(TestClient(app), ("s.csv", SALES_CSV))
+        res = upload(TestClient(app, headers={"X-AskDB-Owner": ME}), ("s.csv", SALES_CSV))
     finally:
         app.dependency_overrides.clear()
     assert res.status_code == 400 and "turned off" in res.json()["detail"]["message"]
@@ -180,6 +191,53 @@ def test_delete_and_unknown_ids(client):
     assert client.get("/api/schema", params={"database": info["id"]}).status_code == 404
     assert client.delete("/api/databases/sample").status_code == 400
     assert client.get("/api/schema", params={"database": "../../etc/passwd"}).status_code == 404
+
+
+def test_uploads_are_private_to_their_browser(client, other):
+    info = upload(client, ("sales.csv", SALES_CSV)).json()
+    db = info["id"]
+    assert [d["id"] for d in other.get("/api/databases").json()["databases"]] == ["sample"]
+    # Querying or deleting someone else's upload looks the same as a missing one.
+    assert other.get("/api/schema", params={"database": db}).status_code == 404
+    assert other.post("/api/run", json={"database": db, "sql": "SELECT 1"}).status_code == 404
+    assert other.post("/api/ask", json={"question": "q", "database": db}).status_code == 404
+    assert other.delete(f"/api/databases/{db}").status_code == 404
+    # ...and the owner still has it.
+    assert client.get("/api/schema", params={"database": db}).status_code == 200
+    assert "owner" not in client.get("/api/databases").json()["databases"][1]
+
+
+def test_upload_needs_a_browser_id(client):
+    for headers in ({}, {"X-AskDB-Owner": "short"}, {"X-AskDB-Owner": "has spaces in it ok?"}):
+        res = TestClient(app, headers=headers).post(
+            "/api/databases", files=[("files", ("s.csv", SALES_CSV))]
+        )
+        assert res.status_code == 400, headers
+        assert "id" in res.json()["detail"]["message"]
+
+
+def test_upload_limit_is_per_browser_with_a_global_cap(client, other, registry):
+    for i in range(3):
+        assert upload(client, (f"t{i}.csv", SALES_CSV)).status_code == 200
+    assert upload(client, ("more.csv", SALES_CSV)).status_code == 400
+    assert upload(other, ("theirs.csv", SALES_CSV)).status_code == 200  # own quota
+
+    registry.settings.max_total_uploads = 4
+    res = upload(other, ("full.csv", SALES_CSV))
+    assert res.status_code == 400 and "full" in res.json()["detail"]["message"]
+
+
+def test_owner_id_is_not_stored(client, registry):
+    upload(client, ("sales.csv", SALES_CSV))
+    meta = next(registry.dir.glob("*.json")).read_text()
+    assert ME not in meta and '"owner": "' in meta
+
+
+def test_ownerless_uploads_are_shared(registry, client, other):
+    """Uploads from before scoping (or from the CLI) stay visible to everyone."""
+    info = registry.add([("sales.csv", SALES_CSV)])
+    for c in (client, other):
+        assert c.get("/api/schema", params={"database": info.id}).status_code == 200
 
 
 def test_uploads_survive_restart(registry, db_path):

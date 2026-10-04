@@ -1,14 +1,16 @@
-import { forward } from "@/lib/backend";
+import { forward, withClientHeaders } from "@/lib/backend";
 
-export async function GET() {
-  return forward("/api/databases");
+export async function GET(request: Request) {
+  return forward("/api/databases", { headers: withClientHeaders(request) });
 }
 
 // Multipart upload: pass the body and its boundary header through unchanged.
 export async function POST(request: Request) {
   return forward("/api/databases", {
     method: "POST",
-    headers: { "content-type": request.headers.get("content-type") ?? "" },
+    headers: withClientHeaders(request, {
+      "content-type": request.headers.get("content-type") ?? "",
+    }),
     body: await request.arrayBuffer(),
   });
 }

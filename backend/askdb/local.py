@@ -160,7 +160,12 @@ class LocalGenerator:
         self.reference_date = reference_date
         self.max_tokens = max_tokens
         self.context_window = context_window
+        self._owns_client = client is None
         self.client = client or httpx.Client(timeout=timeout_s)
+
+    def close(self) -> None:
+        if self._owns_client:
+            self.client.close()
 
     def generate(self, question: str, repairs: list[Repair] | None = None) -> Generation:
         prompt = build_prompt(self.dialect, self.schema_ddl, question, self.reference_date, repairs)

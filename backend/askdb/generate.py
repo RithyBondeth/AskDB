@@ -107,12 +107,22 @@ class ClaudeGenerator:
         effort: str = "medium",
         client: anthropic.Anthropic | None = None,
         context: list[Turn] | None = None,
+        api_key: str | None = None,
     ):
         self.system_prompt = system_prompt
         self.context = context or []
         self.model = model
         self.effort = effort
-        self.client = client or anthropic.Anthropic()
+        # A shared client is left open; one made here (e.g. for a user's own key)
+        # is closed by close().
+        self._owns_client = client is None
+        self.client = client or (
+            anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
+        )
+
+    def close(self) -> None:
+        if self._owns_client:
+            self.client.close()
 
     def generate(self, question: str, repairs: list[Repair] | None = None) -> Generation:
         try:

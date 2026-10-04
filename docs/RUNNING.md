@@ -232,11 +232,23 @@ Limits are set in `backend/.env`:
 | --- | --- | --- |
 | `ASKDB_ALLOW_UPLOADS` | `true` | Set `false` to turn uploads off, for example on a public demo |
 | `ASKDB_MAX_UPLOAD_MB` | `50` | Maximum total size of one upload |
-| `ASKDB_MAX_UPLOADS` | `20` | Maximum number of stored uploads |
+| `ASKDB_MAX_UPLOADS` | `20` | Maximum number of uploads each browser can keep |
+| `ASKDB_MAX_TOTAL_UPLOADS` | `200` | Maximum number of uploads on the server, across everyone |
 | `ASKDB_UPLOAD_DIR` | `data/uploads` | Where uploads are stored |
 
-There are no user accounts. Anyone who can open your AskDB can see and query
-every upload, so don't upload sensitive data to a shared server.
+Your uploads are private to your browser. There are no accounts: the app gives
+your browser a random id (kept in `localStorage`), and only requests carrying that
+id can see, query, or delete your uploads. Other people using the same server
+can't see them. Two things follow:
+
+- Opening AskDB in another browser, a private window, or after clearing site data
+  gives you a new id, and your earlier uploads won't appear there. They stay on
+  the server until deleted from `backend/data/uploads/`.
+- The id isn't a password. Anyone with access to your browser profile can read it,
+  so still don't upload sensitive data to a server you don't control.
+
+Uploads made with an older version of AskDB have no owner and stay visible to
+everyone.
 
 ---
 
@@ -289,14 +301,18 @@ cd backend
 uv run python eval/run_eval.py --limit 5        # quick smoke run, 5 questions
 
 # Full runs, saved for comparison
-uv run python eval/run_eval.py --out eval/results/claude-opus-5-5.json
+uv run python eval/run_eval.py --delay 5 --out eval/results/gemini-free.json
+uv run python eval/run_eval.py --provider claude --out eval/results/claude-opus-5-5.json
 uv run python eval/run_eval.py --provider local --out eval/results/arctic-7b-q4.json
 
-# Markdown table for the README, plus the questions where the models disagree
-uv run python eval/compare.py
+# Print the comparison table and write it into the README
+uv run python eval/compare.py --readme
 ```
 
-Claude runs use API credits. Local runs are free but slower. Commit the files
+The free tier allows only a few requests a minute. `--delay` waits that many
+seconds between questions, and a question that hits the rate limit waits a
+minute and is asked again (up to 3 times), so rate limits don't count as wrong
+answers. Claude runs use API credits. Local runs are free but slower. Commit the files
 in `eval/results/` so you can track accuracy over time.
 
 To add questions, append lines to `eval/dataset.jsonl`:
@@ -306,6 +322,23 @@ To add questions, append lines to `eval/dataset.jsonl`:
 ```
 
 Set `"ordered": true` only when row order matters, for example "top 5 ...".
+Check the gold query for ties first: if the 5th and 6th rows have the same value,
+"top 5" has more than one right answer. The test suite runs every gold query, so
+`uv run pytest` catches typos.
+
+### Record the demo GIF
+
+With the backend and frontend running and a working model key, from the
+repository root:
+
+```bash
+uv run --with playwright playwright install chromium   # first time only
+uv run scripts/record_demo.py                           # writes docs/demo.gif
+```
+
+It types a question, waits for the answer, opens the self-correction details if
+there are any, and asks a follow-up. `--question`, `--follow-up`, `--theme dark`
+and `--width` change what's recorded. It needs `ffmpeg`.
 
 ---
 
@@ -336,7 +369,8 @@ model keys in the app instead of the two key variables.
 | `ASKDB_CORS_ORIGINS` | `["http://localhost:3000"]` | Origins allowed to call the API directly |
 | `ASKDB_ALLOW_UPLOADS` | `true` | Allow uploading SQLite/CSV databases ([section 6](#6-use-your-own-data)) |
 | `ASKDB_MAX_UPLOAD_MB` | `50` | Maximum size of one upload |
-| `ASKDB_MAX_UPLOADS` | `20` | Maximum number of stored uploads |
+| `ASKDB_MAX_UPLOADS` | `20` | Maximum number of uploads per browser |
+| `ASKDB_MAX_TOTAL_UPLOADS` | `200` | Maximum number of uploads on the server |
 
 Frontend setting, in `frontend/.env.local`:
 
@@ -361,8 +395,39 @@ Also:
 - Set `ASKDB_REFERENCE_DATE=` (empty) so relative dates use the real today.
 - Replace the Chinook examples in `backend/askdb/prompts.py` with a few
   question/SQL pairs for your own schema. This noticeably improves accuracy.
-- For PostgreSQL, use a database user that only has read access. AskDB already
-  opens the connection read-only, but a read-only user is a sensible extra layer.
+- For PostgreSQL, connect as a dedicated read-only role, never as `postgres`
+  or another superuser (see below).
+
+#### A PostgreSQL role for AskDB
+
+AskDB only runs single `SELECT` statements, in read-only transactions with a
+statement timeout. That stops writes, but a `SELECT` can still call functions,
+and what those functions may do depends on the role. Connected as a superuser,
+a validated `SELECT` can read files on the database server
+(`pg_read_file('/etc/passwd')`), list its directories (`pg_ls_dir`), read
+password hashes from `pg_authid`, and stop other sessions
+(`pg_terminate_backend`).
+
+Create a role that can only read the tables you want to ask about. Run this as
+an admin, changing the database, schema and password:
+
+```sql
+CREATE ROLE askdb_reader LOGIN PASSWORD 'change-me';
+GRANT CONNECT ON DATABASE mydb TO askdb_reader;
+GRANT USAGE ON SCHEMA public TO askdb_reader;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO askdb_reader;
+-- Tables created later in this schema are readable too:
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO askdb_reader;
+-- Read-only even if something connects without AskDB's settings:
+ALTER ROLE askdb_reader SET default_transaction_read_only = on;
+```
+
+Then use `postgresql+psycopg://askdb_reader:change-me@host:5432/mydb`. As this
+role the file, directory, password-hash and large-object functions above fail
+with "permission denied", and only the granted tables can be read. To hide
+sensitive tables or columns from the model, grant `SELECT` on just the ones you
+want, or on views. Don't give the role `pg_read_server_files`,
+`pg_read_all_data`, `pg_signal_backend`, or membership in an admin role.
 
 The open model is trained on SQLite, so expect it to do better on SQLite
 databases than on PostgreSQL.
@@ -391,6 +456,8 @@ databases than on PostgreSQL.
 | `Blocked: Only SELECT queries are allowed` | Working as intended. AskDB never runs queries that change data. |
 | `This isn't a SQLite database file.` | The file has a `.db`/`.sqlite` name but isn't SQLite. Export it as SQLite, or as CSV. |
 | `Upload limit reached` | Delete an old upload from the database menu, or raise `ASKDB_MAX_UPLOADS`. |
+| `This server is full` | The server has `ASKDB_MAX_TOTAL_UPLOADS` uploads. Remove old ones from `backend/data/uploads/` or raise the limit. |
+| An upload disappeared | Uploads belong to the browser that made them. Use the same browser, without clearing site data. |
 | `needs a header row and at least one data row` | The CSV's first line must be column names, followed by data. |
 | `That database no longer exists.` | Someone deleted the upload. Pick another database from the menu. |
 

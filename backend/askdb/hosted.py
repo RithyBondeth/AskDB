@@ -39,7 +39,9 @@ def list_models(
     base_url: str, api_key: str | None, client: httpx.Client | None = None
 ) -> list[str]:
     """Model IDs the endpoint offers (GET /models), to find a valid ASKDB_FREE_MODEL."""
-    client = client or httpx.Client(timeout=30)
+    if client is None:
+        with httpx.Client(timeout=30) as own:
+            return list_models(base_url, api_key, own)
     res = client.get(f"{base_url.rstrip('/')}/models", headers=_headers(api_key))
     res.raise_for_status()
     ids = [m.get("id", "") for m in res.json().get("data", [])]
@@ -80,7 +82,12 @@ class HostedGenerator:
         self.api_key = api_key
         self.context = context or []
         self.max_tokens = max_tokens  # thinking models count reasoning against this
+        self._owns_client = client is None
         self.client = client or httpx.Client(timeout=timeout_s)
+
+    def close(self) -> None:
+        if self._owns_client:
+            self.client.close()
 
     def generate(self, question: str, repairs: list[Repair] | None = None) -> Generation:
         if not self.api_key:

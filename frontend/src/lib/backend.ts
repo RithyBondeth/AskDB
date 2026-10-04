@@ -2,6 +2,7 @@
 // forward to the Python API. This keeps the backend URL private and avoids CORS.
 
 import { KEY_HEADER } from "@/lib/keys";
+import { OWNER_HEADER } from "@/lib/owner";
 
 const BACKEND_URL = process.env.ASKDB_API_URL ?? "http://127.0.0.1:8000";
 
@@ -26,8 +27,13 @@ export async function forward(path: string, init?: RequestInit): Promise<Respons
   }
 }
 
-/** Headers for the backend, plus the user's own model key if the browser sent one. */
-export function withUserKey(request: Request, headers: Record<string, string>) {
-  const key = request.headers.get(KEY_HEADER);
-  return key ? { ...headers, [KEY_HEADER]: key } : headers;
+/** Headers for the backend, plus the ones the browser sent that the backend needs:
+ *  the user's own model key and the browser's id (which owns its uploads). */
+export function withClientHeaders(request: Request, headers: Record<string, string> = {}) {
+  const out = { ...headers };
+  for (const name of [KEY_HEADER, OWNER_HEADER]) {
+    const value = request.headers.get(name);
+    if (value) out[name] = value;
+  }
+  return out;
 }
