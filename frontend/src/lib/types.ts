@@ -2,7 +2,7 @@
 
 export type Cell = string | number | boolean | null;
 export type Provider = "claude" | "free" | "groq" | "openrouter" | "openai" | "local";
-export type Stage = "generate" | "validate" | "execute";
+export type Stage = "generate" | "validate" | "execute" | "summarize";
 
 export interface Attempt {
   sql: string;
@@ -10,11 +10,17 @@ export interface Attempt {
   stage: "validate" | "execute" | null;
 }
 
+export type ChartType = "bar" | "line" | "pie" | "scatter";
+
 export interface ChartSpec {
-  type: "bar" | "line" | "none";
+  type: ChartType | "none";
   x: string | null;
   y: string[] | null;
   reason: string;
+  /** Long-format results: one series per value of this column (stacked bars, lines). */
+  group?: string | null;
+  /** Scatter: the column that names each point. */
+  label?: string | null;
 }
 
 export interface AskResponse {
@@ -28,6 +34,10 @@ export interface AskResponse {
   truncated: boolean;
   chart: ChartSpec;
   attempts: Attempt[];
+  /** A plain-language answer. While streaming it arrives after the result. */
+  summary?: string | null;
+  /** The saved answer's id (share links, feedback), when the server keeps history. */
+  id?: string | null;
 }
 
 export interface AskError {
@@ -55,16 +65,47 @@ export interface SchemaResponse {
 export interface DatabaseInfo {
   id: string;
   name: string;
-  kind: "sample" | "sqlite" | "csv";
+  kind: "sample" | "sqlite" | "csv" | "postgres" | "mysql";
   tables: number;
   size_bytes: number;
   created_at: string;
+  /** Live connections: user@host:port/database (never the password). */
+  detail?: string;
 }
 
 export interface DatabasesResponse {
   databases: DatabaseInfo[];
   allow_uploads: boolean;
+  allow_connections?: boolean;
   max_upload_mb: number;
+  save_history?: boolean;
+}
+
+/** GET /api/history: one saved answer in the list. */
+export interface SavedAnswerSummary {
+  id: string;
+  database: string;
+  question: string;
+  created_at: string;
+  shared: boolean;
+  rating: 1 | -1 | null;
+}
+
+/** GET /api/history/{id}: a saved answer with its full response. */
+export interface SavedAnswer {
+  id: string;
+  database: string;
+  created_at: string;
+  shared: boolean;
+  rating: 1 | -1 | null;
+  response: AskResponse;
+}
+
+/** POST /api/rows: another page of an answer's rows. */
+export interface RowsPage {
+  columns: string[];
+  rows: Cell[][];
+  truncated: boolean;
 }
 
 export interface HealthResponse {
@@ -90,6 +131,7 @@ export type StreamEvent =
       will_retry: boolean;
     }
   | { type: "result"; data: AskResponse }
+  | { type: "summary"; text: string }
   | { type: "error"; status: number; detail: AskError };
 
 /** Live progress of one question, built from stream events. */
@@ -114,6 +156,12 @@ export interface Turn {
   data?: AskResponse;
   original?: AskResponse; // the model's answer, kept when the user edits the SQL
   error?: AskError;
+  /** The result is in and the plain-language summary is still being written. */
+  summarizing?: boolean;
+  /** The user's 👍/👎 on this answer. */
+  rating?: 1 | -1;
+  /** Opened from history or a share link rather than asked just now. */
+  saved?: boolean;
 }
 
 /** GET /api/models: what the model menu offers for one provider. */

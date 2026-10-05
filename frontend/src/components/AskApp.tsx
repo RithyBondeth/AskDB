@@ -5,20 +5,35 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import CommandPalette, { buildCommands } from "@/components/CommandPalette";
 import Composer from "@/components/Composer";
+import ConnectDialog from "@/components/ConnectDialog";
 import DatabasePicker from "@/components/DatabasePicker";
 import Doodle from "@/components/Doodle";
 import Examples from "@/components/Examples";
 import Header from "@/components/Header";
 import KeysDialog from "@/components/KeysDialog";
 import SetupNotice from "@/components/SetupNotice";
-import Sidebar, { SidebarDrawer } from "@/components/Sidebar";
+import Sidebar, { type HistoryItem, SidebarDrawer } from "@/components/Sidebar";
+import SyncDialog from "@/components/SyncDialog";
 import TurnView from "@/components/TurnView";
 import UploadDialog from "@/components/UploadDialog";
 import { type ApiKeys, keyFor, loadKeys, saveKeys } from "@/lib/keys";
 import { loadChoice, type ModelChoice, saveChoice } from "@/lib/modelChoice";
 import { ownerHeaders } from "@/lib/owner";
 import { effectiveModel, PROVIDERS } from "@/lib/providers";
-import { askStream, deleteDatabase, fetchModels, runSql } from "@/lib/stream";
+import {
+  askStream,
+  clearHistory,
+  deleteDatabase,
+  deleteSavedAnswer,
+  exportCsv,
+  fetchModels,
+  fetchRows,
+  getSavedAnswer,
+  listHistory,
+  runSql,
+  sendFeedback,
+  shareAnswer,
+} from "@/lib/stream";
 import { getTheme, nextTheme, setTheme } from "@/lib/theme";
 import type {
   AskError,
@@ -27,18 +42,21 @@ import type {
   HealthResponse,
   ModelsResponse,
   Provider,
+  SavedAnswer,
   SchemaResponse,
   StreamEvent,
   Turn,
 } from "@/lib/types";
 
 const HISTORY_KEY = "askdb-history";
-const HISTORY_MAX = 8;
+const HISTORY_MAX = 8; // kept in this browser when the server doesn't save answers
+const SERVER_HISTORY_MAX = 50;
 const CONTEXT_TURNS = 3; // earlier answers sent with a follow-up
 const DATABASE_KEY = "askdb-database";
 const SAMPLE = "sample";
 
-// Recent questions are kept per database: a question only makes sense for its data.
+// Without server history, recent questions are kept in this browser, per database:
+// a question only makes sense for its data.
 function loadHistory(database: string): string[] {
   try {
     const raw = JSON.parse(localStorage.getItem(`${HISTORY_KEY}:${database}`) ?? "[]");
@@ -83,14 +101,18 @@ export default function AskApp() {
   const [modelsLoading, setModelsLoading] = useState(false);
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [offline, setOffline] = useState(false);
-  const [history, setHistory] = useState<string[]>([]);
+  const [history, setHistory] = useState<HistoryItem[]>([]);
+  // Answers are saved on the server (and follow the sync code) unless it's turned off.
+  const [serverHistory, setServerHistory] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [connectOpen, setConnectOpen] = useState(false);
+  const [syncOpen, setSyncOpen] = useState(false);
   const [keysOpen, setKeysOpen] = useState(false);
   const [keys, setKeys] = useState<ApiKeys>({});
   const [databases, setDatabases] = useState<DatabaseInfo[]>([]);
-  const [uploads, setUploads] = useState({ allowed: false, maxMb: 50 });
+  const [uploads, setUploads] = useState({ allowed: false, maxMb: 50, connections: false });
   const [database, setDatabase] = useState<string>(SAMPLE);
   const [schema, setSchema] = useState<SchemaResponse | null>(null);
   const [schemaFailed, setSchemaFailed] = useState(false);
@@ -103,6 +125,8 @@ export default function AskApp() {
   const keysRef = useRef(keys);
   const turnsRef = useRef(turns);
   const databaseRef = useRef(database);
+  const databasesRef = useRef<DatabaseInfo[]>([]);
+  const selectDatabaseRef = useRef<(id: string) => void>(() => {});
   useEffect(() => {
     providerRef.current = provider;
     keysRef.current = keys;
@@ -167,11 +191,25 @@ export default function AskApp() {
     setTurns((ts) => ts.map((t) => (t.id === id ? fn(t) : t)));
   }, []);
 
-  const remember = useCallback((q: string) => {
+  const serverHistoryRef = useRef(serverHistory);
+  useEffect(() => {
+    serverHistoryRef.current = serverHistory;
+  }, [serverHistory]);
+
+  /** Put a question at the top of Recent: a saved answer, or (without server
+   *  history) a question kept in this browser. */
+  const remember = useCallback((q: string, id?: string | null) => {
+    if (serverHistoryRef.current) {
+      if (!id) return;
+      setHistory((h) =>
+        [{ id, question: q }, ...h.filter((x) => x.id !== id)].slice(0, SERVER_HISTORY_MAX),
+      );
+      return;
+    }
     setHistory((h) => {
-      const next = [q, ...h.filter((x) => x !== q)].slice(0, HISTORY_MAX);
+      const next = [q, ...h.map((x) => x.question).filter((x) => x !== q)].slice(0, HISTORY_MAX);
       saveHistory(databaseRef.current, next);
-      return next;
+      return next.map((question) => ({ question }));
     });
   }, []);
 
@@ -180,7 +218,7 @@ export default function AskApp() {
       const trimmed = q.trim();
       if (!trimmed || turnsRef.current.some((t) => t.status === "running")) return;
       setQuestion("");
-      remember(trimmed);
+      if (!serverHistoryRef.current) remember(trimmed);
 
       const context = turnsRef.current
         .filter((t) => t.status === "done" && t.data)
@@ -203,11 +241,26 @@ export default function AskApp() {
       const controller = new AbortController();
       abortRef.current = controller;
       const onEvent = (e: StreamEvent) => {
-        if (e.type === "stage") {
+        if (e.type === "stage" && e.stage !== "summarize") {
           update(id, (t) => ({
             ...t,
             progress: { ...t.progress, stage: e.stage, attempt: e.attempt ?? t.progress.attempt },
           }));
+        } else if (e.type === "result") {
+          // Show the answer now; the summary follows in its own event.
+          update(id, (t) => ({
+            ...t,
+            status: "done",
+            data: e.data,
+            summarizing: true,
+            seconds: (Date.now() - t.startedAt) / 1000,
+            progress: { ...t.progress, stage: "present" },
+          }));
+          remember(trimmed, e.data.id);
+        } else if (e.type === "summary") {
+          update(id, (t) =>
+            t.data && !t.original ? { ...t, data: { ...t.data, summary: e.text } } : t,
+          );
         } else if (e.type === "attempt_failed") {
           update(id, (t) => ({
             ...t,
@@ -237,8 +290,10 @@ export default function AskApp() {
         update(id, (t) => ({
           ...t,
           status: "done",
-          data,
-          seconds: (Date.now() - t.startedAt) / 1000,
+          // Keep any edit the user made while the summary was being written.
+          data: t.original ? t.data : { ...data, summary: data.summary ?? t.data?.summary },
+          summarizing: false,
+          seconds: t.seconds ?? (Date.now() - t.startedAt) / 1000,
           progress: { ...t.progress, stage: "present" },
         }));
       } catch (err) {
@@ -274,7 +329,14 @@ export default function AskApp() {
       if (!res.ok) return [];
       const body = (await res.json()) as DatabasesResponse;
       setDatabases(body.databases);
-      setUploads({ allowed: body.allow_uploads, maxMb: body.max_upload_mb });
+      databasesRef.current = body.databases;
+      setUploads({
+        allowed: body.allow_uploads,
+        maxMb: body.max_upload_mb,
+        connections: Boolean(body.allow_connections),
+      });
+      setServerHistory(Boolean(body.save_history));
+      serverHistoryRef.current = Boolean(body.save_history);
       return body.databases;
     } catch {
       return [];
@@ -291,13 +353,72 @@ export default function AskApp() {
     },
     [newChat],
   );
+  useEffect(() => {
+    selectDatabaseRef.current = selectDatabase;
+    databasesRef.current = databases;
+  }, [selectDatabase, databases]);
 
-  // Schema, suggested questions, and recent questions for the selected database.
+  // Recent questions for the selected database: saved answers on the server, or
+  // questions kept in this browser.
   useEffect(() => {
     let cancelled = false;
-    // localStorage is only available after mount.
+    if (!serverHistory) {
+      // localStorage is only available after mount.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setHistory(loadHistory(database).map((question) => ({ question })));
+      return;
+    }
+    listHistory(database)
+      .then(
+        (items) =>
+          !cancelled &&
+          setHistory(items.map((a) => ({ id: a.id, question: a.question, rating: a.rating }))),
+      )
+      .catch(() => !cancelled && setHistory([]));
+    return () => {
+      cancelled = true;
+    };
+  }, [database, serverHistory]);
+
+  /** Show a saved answer (from Recent or a share link) without asking the model again. */
+  const openSaved = useCallback(async (answerId: string) => {
+    let saved: SavedAnswer;
+    try {
+      saved = await getSavedAnswer(answerId);
+    } catch (e) {
+      window.alert((e as AskError).message);
+      return;
+    }
+    const res = saved.response;
+    // Switch to its database when this browser can see it (that starts a new chat).
+    if (
+      saved.database !== databaseRef.current &&
+      databasesRef.current.some((d) => d.id === saved.database)
+    ) {
+      selectDatabaseRef.current(saved.database);
+    }
+    const turn: Turn = {
+      id: crypto.randomUUID(),
+      question: res.question,
+      provider: res.provider === "manual" ? providerRef.current : res.provider,
+      model: res.model,
+      database: saved.database,
+      status: "done",
+      progress: { stage: "present", attempt: res.attempts.length, failures: [] },
+      startedAt: Date.now(),
+      seconds: 0,
+      data: { ...res, id: saved.id },
+      rating: saved.rating ?? undefined,
+      saved: true,
+    };
+    setTurns((ts) => (ts.some((t) => t.data?.id === saved.id) ? ts : [...ts, turn]));
+    setDrawerOpen(false);
+  }, []);
+
+  // Schema and suggested questions for the selected database.
+  useEffect(() => {
+    let cancelled = false;
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setHistory(loadHistory(database));
     setSchema(null);
     setSchemaFailed(false);
     fetch(`/api/schema?database=${encodeURIComponent(database)}`, { headers: ownerHeaders() })
@@ -319,6 +440,7 @@ export default function AskApp() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const shared = params.get("q");
+    const sharedAnswer = params.get("a");
     const initialDb = params.get("db") ?? loadDatabase();
     (async () => {
       // Keys live in localStorage, so they're read here rather than during render.
@@ -340,12 +462,15 @@ export default function AskApp() {
       } catch {
         setOffline(true);
       }
-      if (shared) {
+      if (sharedAnswer) {
+        window.history.replaceState(null, "", window.location.pathname);
+        openSaved(sharedAnswer);
+      } else if (shared) {
         window.history.replaceState(null, "", window.location.pathname);
         ask(shared);
       }
     })();
-  }, [ask, refreshDatabases, selectDatabase]);
+  }, [ask, openSaved, refreshDatabases, selectDatabase]);
 
   // Keyboard: ⌘K / Ctrl+K palette, "/" focuses the question box.
   useEffect(() => {
@@ -383,7 +508,7 @@ export default function AskApp() {
       // Builds closures only; refs inside `ask` are read when a command runs, not here.
       // eslint-disable-next-line react-hooks/refs
       buildCommands({
-        history,
+        history: history.map((h) => h.question),
         suggestions: schema?.suggestions ?? [],
         databases,
         currentDatabase: database,
@@ -411,11 +536,40 @@ export default function AskApp() {
   const sidebar = (
     <Sidebar
       history={history}
-      onPick={ask}
-      onClearHistory={() => {
-        setHistory([]);
-        saveHistory(database, []);
+      onPick={(item) => (item.id ? openSaved(item.id) : ask(item.question))}
+      onDelete={async (item) => {
+        if (item.id) {
+          try {
+            await deleteSavedAnswer(item.id);
+          } catch (e) {
+            window.alert((e as AskError).message);
+            return;
+          }
+          setHistory((h) => h.filter((x) => x.id !== item.id));
+        } else {
+          const next = history.filter((x) => x.question !== item.question);
+          setHistory(next);
+          saveHistory(
+            database,
+            next.map((x) => x.question),
+          );
+        }
       }}
+      onClearHistory={async () => {
+        if (serverHistory) {
+          if (!window.confirm("Delete every saved answer for this database?")) return;
+          try {
+            await clearHistory(database);
+          } catch (e) {
+            window.alert((e as AskError).message);
+            return;
+          }
+        } else {
+          saveHistory(database, []);
+        }
+        setHistory([]);
+      }}
+      onSync={serverHistory ? () => setSyncOpen(true) : null}
       onInsert={insert}
       disabled={busy}
       schema={schema}
@@ -426,7 +580,11 @@ export default function AskApp() {
   const current = databases.find((d) => d.id === database);
 
   async function removeDatabase(db: DatabaseInfo) {
-    if (!window.confirm(`Delete “${db.name}”? This removes the uploaded data from the server.`)) {
+    const what =
+      db.kind === "postgres" || db.kind === "mysql"
+        ? "This removes the connection (and its saved answers) from AskDB. Your database isn't touched."
+        : "This removes the uploaded data from the server.";
+    if (!window.confirm(`Delete “${db.name}”? ${what}`)) {
       return;
     }
     try {
@@ -470,8 +628,10 @@ export default function AskApp() {
             current={current}
             onSelect={selectDatabase}
             onUpload={() => setUploadOpen(true)}
+            onConnect={() => setConnectOpen(true)}
             onDelete={removeDatabase}
             allowUploads={uploads.allowed}
+            allowConnections={uploads.connections}
           />
         }
         hasThread={turns.length > 0}
@@ -598,13 +758,86 @@ export default function AskApp() {
                     }}
                     onFollowUp={ask}
                     onShare={async () => {
-                      const db =
-                        t.database === SAMPLE ? "" : `&db=${encodeURIComponent(t.database)}`;
-                      const url = `${window.location.origin}/?q=${encodeURIComponent(t.question)}${db}`;
+                      // A saved answer is shared as-is (no model call for whoever opens
+                      // it); otherwise the link asks the question again.
+                      const answerId = (t.original ?? t.data)?.id;
+                      let url: string;
+                      let kind: "answer" | "question" = "question";
+                      if (answerId) {
+                        try {
+                          await shareAnswer(answerId);
+                          url = `${window.location.origin}/?a=${answerId}`;
+                          kind = "answer";
+                        } catch {
+                          url = "";
+                        }
+                      } else {
+                        url = "";
+                      }
+                      if (!url) {
+                        const db =
+                          t.database === SAMPLE ? "" : `&db=${encodeURIComponent(t.database)}`;
+                        url = `${window.location.origin}/?q=${encodeURIComponent(t.question)}${db}`;
+                      }
                       try {
                         await navigator.clipboard.writeText(url);
+                        return kind;
                       } catch {
-                        // clipboard blocked: nothing else to do
+                        return null; // clipboard blocked
+                      }
+                    }}
+                    onRate={async (rating) => {
+                      const base = t.original ?? t.data;
+                      if (!base) return;
+                      const edited = t.original && t.data ? t.data.sql : undefined;
+                      try {
+                        await sendFeedback({
+                          answer_id: base.id,
+                          database: t.database,
+                          question: t.question,
+                          sql: base.sql,
+                          rating,
+                          corrected_sql: edited !== base.sql ? edited : undefined,
+                          provider: base.provider,
+                          model: base.model,
+                        });
+                        update(t.id, (cur) => ({ ...cur, rating }));
+                        setHistory((h) =>
+                          h.map((x) => (x.id && x.id === base.id ? { ...x, rating } : x)),
+                        );
+                      } catch (e) {
+                        window.alert((e as AskError).message);
+                      }
+                    }}
+                    onMoreRows={async () => {
+                      const data = t.data;
+                      if (!data) return null;
+                      try {
+                        const page = await fetchRows(data.sql, t.database, data.rows.length);
+                        update(t.id, (cur) =>
+                          cur.data
+                            ? {
+                                ...cur,
+                                data: {
+                                  ...cur.data,
+                                  rows: [...cur.data.rows, ...page.rows],
+                                  truncated: page.truncated,
+                                },
+                              }
+                            : cur,
+                        );
+                        return null;
+                      } catch (e) {
+                        return (e as AskError).message ?? "Couldn't load more rows.";
+                      }
+                    }}
+                    onExportAll={async () => {
+                      if (!t.data) return null;
+                      try {
+                        await exportCsv(t.data.sql, t.database);
+                        return null;
+                      } catch (e) {
+                        return (e as AskError).message ?? "Export failed.";
                       }
                     }}
                   />
@@ -643,6 +876,18 @@ export default function AskApp() {
           selectDatabase(info.id);
         }}
       />
+
+      <ConnectDialog
+        open={connectOpen}
+        onClose={() => setConnectOpen(false)}
+        onConnected={async (info) => {
+          setConnectOpen(false);
+          await refreshDatabases();
+          selectDatabase(info.id);
+        }}
+      />
+
+      <SyncDialog open={syncOpen} onClose={() => setSyncOpen(false)} />
 
       <KeysDialog
         open={keysOpen}

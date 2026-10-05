@@ -24,6 +24,30 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    # Real servers for the live connection tests (read-only session, timeouts).
+    # The test users can write, to show AskDB's session is what stops writes.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: askdb
+          POSTGRES_DB: shop
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s
+          --health-retries 10
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: askdb
+          MYSQL_DATABASE: shop
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -paskdb"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      ASKDB_TEST_POSTGRES_URL: postgresql://postgres:askdb@127.0.0.1:5432/shop
+      ASKDB_TEST_MYSQL_URL: mysql://root:askdb@127.0.0.1:3306/shop
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -37,8 +61,12 @@ jobs:
         run: uv run ruff check . ../scripts
       - name: Format
         run: uv run ruff format --check . ../scripts
+      - name: Seed test databases
+        run: |
+          uv run python tests/seed_live_db.py "$ASKDB_TEST_POSTGRES_URL"
+          uv run python tests/seed_live_db.py "$ASKDB_TEST_MYSQL_URL"
       - name: Test
-        run: uv run pytest -q
+        run: uv run pytest -q -rs
 
   frontend:
     name: Frontend
@@ -63,3 +91,42 @@ jobs:
         run: npm test
       - name: Build
         run: npm run build
+
+  e2e:
+    name: Browser smoke tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - name: Install backend
+        working-directory: backend
+        run: uv sync --locked
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend
+        working-directory: frontend
+        run: npm ci
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+      # Real frontend and backend; a mock model (frontend/e2e/mock-model.mjs) answers.
+      - name: Run browser tests
+        working-directory: frontend
+        run: npm run e2e
+      - name: Upload traces on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: frontend/test-results/
+          retention-days: 7

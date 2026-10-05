@@ -6,6 +6,9 @@ import type {
   DatabaseInfo,
   ModelsResponse,
   Provider,
+  RowsPage,
+  SavedAnswer,
+  SavedAnswerSummary,
   StreamEvent,
 } from "@/lib/types";
 
@@ -23,7 +26,9 @@ export interface AskOptions {
 }
 
 /** POST /api/ask/stream and feed each Server-Sent Event to onEvent. Resolves with the
- *  final result, or rejects with an AskError. */
+ *  final result once the stream ends (after the `summary` event that follows the
+ *  result), or rejects with an AskError. The result also reaches onEvent as soon as
+ *  it arrives, so the UI can show it while the summary is written. */
 export async function askStream({
   question,
   provider,
@@ -57,22 +62,31 @@ export async function askStream({
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    let split: number;
-    while ((split = buffer.indexOf("\n\n")) >= 0) {
-      const chunk = buffer.slice(0, split);
-      buffer = buffer.slice(split + 2);
-      const line = chunk.split("\n").find((l) => l.startsWith("data: "));
-      if (!line) continue;
-      const event = JSON.parse(line.slice(6)) as StreamEvent;
-      onEvent(event);
-      if (event.type === "result") return event.data;
-      if (event.type === "error") throw event.detail;
+  let result = null as AskResponse | null; // (not narrowed to null inside the loop)
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let split: number;
+      while ((split = buffer.indexOf("\n\n")) >= 0) {
+        const chunk = buffer.slice(0, split);
+        buffer = buffer.slice(split + 2);
+        const line = chunk.split("\n").find((l) => l.startsWith("data: "));
+        if (!line) continue;
+        const event = JSON.parse(line.slice(6)) as StreamEvent;
+        onEvent(event);
+        if (event.type === "result") result = event.data;
+        else if (event.type === "summary" && result) result = { ...result, summary: event.text };
+        else if (event.type === "error") throw event.detail;
+      }
     }
+  } catch (err) {
+    // Stopped or disconnected while the summary was being written: the answer stands.
+    if (result) return result;
+    throw err;
   }
+  if (result) return result;
   throw { message: "The connection closed before an answer arrived.", attempts: [] } as AskError;
 }
 
@@ -89,6 +103,109 @@ export async function runSql(sql: string, database: string): Promise<AskResponse
   }
   if (!res.ok) throw await errorFrom(res);
   return (await res.json()) as AskResponse;
+}
+
+async function postJson<T>(path: string, body: unknown): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      method: "POST",
+      headers: ownerHeaders({ "content-type": "application/json" }),
+      body: JSON.stringify(body),
+    });
+  } catch {
+    throw { message: "Network error: could not reach the server.", attempts: [] } as AskError;
+  }
+  if (!res.ok) throw await errorFrom(res);
+  return (await res.json()) as T;
+}
+
+/** The next page of an answer's rows (the same SQL, re-run from `offset`). */
+export function fetchRows(
+  sql: string,
+  database: string,
+  offset: number,
+  limit = 500,
+): Promise<RowsPage> {
+  return postJson<RowsPage>("/api/rows", { sql, database, offset, limit });
+}
+
+/** Download every row of an answer as CSV (the server caps very large exports). */
+export async function exportCsv(sql: string, database: string, filename = "askdb-result.csv") {
+  const res = await fetch("/api/export", {
+    method: "POST",
+    headers: ownerHeaders({ "content-type": "application/json" }),
+    body: JSON.stringify({ sql, database }),
+  });
+  if (!res.ok) throw await errorFrom(res);
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/** Add a live PostgreSQL or MySQL database by connection string. */
+export function connectDatabase(url: string, name: string): Promise<DatabaseInfo> {
+  return postJson<DatabaseInfo>("/api/databases/connect", {
+    url,
+    name: name.trim() || undefined,
+  });
+}
+
+/** This browser's saved answers for a database, newest first. */
+export async function listHistory(database: string): Promise<SavedAnswerSummary[]> {
+  const res = await fetch(`/api/history?database=${encodeURIComponent(database)}`, {
+    headers: ownerHeaders(),
+  });
+  if (!res.ok) throw await errorFrom(res);
+  return ((await res.json()) as { answers: SavedAnswerSummary[] }).answers;
+}
+
+/** A saved answer: this browser's own, or a shared one. */
+export async function getSavedAnswer(id: string): Promise<SavedAnswer> {
+  const res = await fetch(`/api/history/${encodeURIComponent(id)}`, { headers: ownerHeaders() });
+  if (!res.ok) throw await errorFrom(res);
+  return (await res.json()) as SavedAnswer;
+}
+
+export async function deleteSavedAnswer(id: string): Promise<void> {
+  const res = await fetch(`/api/history/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: ownerHeaders(),
+  });
+  if (!res.ok) throw await errorFrom(res);
+}
+
+export async function clearHistory(database: string): Promise<void> {
+  const res = await fetch(`/api/history?database=${encodeURIComponent(database)}`, {
+    method: "DELETE",
+    headers: ownerHeaders(),
+  });
+  if (!res.ok) throw await errorFrom(res);
+}
+
+/** Let anyone with the link see a saved answer. */
+export function shareAnswer(id: string, shared = true): Promise<{ shared: boolean }> {
+  return postJson(`/api/history/${encodeURIComponent(id)}/share`, { shared });
+}
+
+export interface Feedback {
+  answer_id?: string | null;
+  database: string;
+  question: string;
+  sql: string;
+  rating: 1 | -1;
+  corrected_sql?: string;
+  comment?: string;
+  provider?: string;
+  model?: string;
+}
+
+/** 👍/👎 on an answer, with the user's corrected SQL when they fixed it. */
+export function sendFeedback(feedback: Feedback): Promise<{ id: string }> {
+  return postJson("/api/feedback", feedback);
 }
 
 /** Upload files as a new database, reporting upload progress (0-1). */

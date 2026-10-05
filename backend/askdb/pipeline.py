@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import os
 from dataclasses import dataclass, field
 
@@ -20,10 +21,14 @@ from askdb.generate import (
     build_system_prompt,
 )
 from askdb.hosted import HostedGenerator
+from askdb.linking import OpenAIEmbedder, SchemaIndex, tokens
 from askdb.local import LocalGenerator
+from askdb.present import describe_result
 from askdb.prompts import FEW_SHOT_EXAMPLES
 from askdb.providers import HOSTED, PROVIDERS, Provider, default_model, hosted_config
-from askdb.schema import Schema, introspect, link_tables
+from askdb.schema import Schema, introspect
+
+log = logging.getLogger("askdb.pipeline")
 
 MISSING_ANTHROPIC_KEY = (
     "No Anthropic key. Add yours under API keys (the key button at the top of the page), "
@@ -31,6 +36,30 @@ MISSING_ANTHROPIC_KEY = (
 )
 
 __all__ = ["AskDB", "Provider", "PROVIDERS"]
+
+
+def make_embedder(settings: Settings) -> OpenAIEmbedder | None:
+    """The embedding model for schema linking, if one is configured."""
+    if not settings.embedding_model:
+        return None
+    key = settings.embedding_api_key or settings.free_api_key
+    return OpenAIEmbedder(
+        settings.embedding_base_url or settings.free_base_url,
+        settings.embedding_model,
+        key.get_secret_value() if key else None,
+    )
+
+
+def similar_examples(
+    question: str, examples: list[tuple[str, str]], k: int
+) -> list[tuple[str, str]]:
+    """The `k` examples whose questions share the most words with `question`."""
+    if k <= 0 or not examples:
+        return []
+    words = set(tokens(question))
+    scored = [(len(words & set(tokens(q))), i) for i, (q, _) in enumerate(examples)]
+    best = sorted((s for s in scored if s[0] > 0), key=lambda s: (-s[0], s[1]))[:k]
+    return [examples[i] for _, i in best]
 
 
 @dataclass
@@ -43,6 +72,14 @@ class AskDB:
     # "Today" for relative dates. None means the real current date.
     fixed_date: str | None = None
     _client: anthropic.Anthropic | None = field(default=None, repr=False)
+    _index: SchemaIndex | None = field(default=None, repr=False)
+
+    @property
+    def index(self) -> SchemaIndex:
+        """Retrieval over this database's tables, built on first use."""
+        if self._index is None:
+            self._index = SchemaIndex(self.schema, make_embedder(self.settings))
+        return self._index
 
     @classmethod
     def from_settings(cls, settings: Settings | None = None) -> AskDB:
@@ -61,8 +98,16 @@ class AskDB:
         cls, path: str, settings: Settings | None = None, client: anthropic.Anthropic | None = None
     ) -> AskDB:
         """An uploaded SQLite file: no schema-specific examples, real dates."""
+        return cls.for_database(f"sqlite:///{path}", settings, client)
+
+    @classmethod
+    def for_database(
+        cls, url: str, settings: Settings | None = None, client: anthropic.Anthropic | None = None
+    ) -> AskDB:
+        """An uploaded file or a database someone connected: no schema-specific
+        examples, real dates."""
         settings = settings or get_settings()
-        engine = make_engine(f"sqlite:///{path}", settings.statement_timeout_s)
+        engine = make_engine(url, settings.statement_timeout_s)
         return cls(
             settings=settings,
             engine=engine,
@@ -118,16 +163,23 @@ class AskDB:
         context: list[Turn] | None = None,
         api_key: str | None = None,
         model: str | None = None,
+        extra_examples: list[tuple[str, str]] | None = None,
     ) -> SQLGenerator:
         """The generator for a provider. `api_key` is the user's own key for that
         provider (from the browser); it takes precedence over the server's key.
         `model` must already be checked (askdb.providers.resolve_model); None uses
-        the provider's default."""
+        the provider's default. `extra_examples` are verified question/SQL pairs
+        (from feedback); the ones most like this question join the prompt."""
         provider = provider or self.default_provider
         model = model or self.model_name(provider)
         # Link on the whole conversation so follow-ups keep the tables they build on.
         linking_text = " ".join([*(t.question for t in context or []), question])
-        tables = link_tables(self.schema, linking_text)
+        tables = self.index.link(linking_text)
+        known = {q.strip().lower() for q, _ in self.examples}
+        extra = [e for e in extra_examples or [] if e[0].strip().lower() not in known]
+        examples = self.examples + similar_examples(
+            question, extra, self.settings.feedback_examples
+        )
         if provider == "local":
             return LocalGenerator(
                 dialect=self.schema.dialect,
@@ -144,7 +196,7 @@ class AskDB:
             schema_ddl=self.schema.ddl(tables),
             row_limit=self.settings.row_limit,
             reference_date=self.reference_date,
-            examples=self.examples,
+            examples=examples,
         )
         if provider != "claude":
             cfg = hosted_config(self.settings, provider)
@@ -179,9 +231,12 @@ class AskDB:
         on_event: EventHandler | None = None,
         api_key: str | None = None,
         model: str | None = None,
+        extra_examples: list[tuple[str, str]] | None = None,
     ) -> Answer:
         own = generator is None
-        gen = generator or self.generator_for(question, provider, context, api_key, model)
+        gen = generator or self.generator_for(
+            question, provider, context, api_key, model, extra_examples
+        )
         try:
             return answer(
                 question,
@@ -196,6 +251,38 @@ class AskDB:
             # Generators are built per question; release their HTTP connections.
             if own and (close := getattr(gen, "close", None)):
                 close()
+
+    def summarize(
+        self,
+        ans: Answer,
+        provider: Provider | None = None,
+        api_key: str | None = None,
+        model: str | None = None,
+    ) -> str | None:
+        """A plain-language sentence answering the question from the result.
+
+        Asks the model that wrote the SQL when ASKDB_SUMMARIES=model (except the
+        open model, which is tuned for SQL only); otherwise, or if that call fails,
+        a template sentence. None when summaries are off.
+        """
+        mode = self.settings.summaries
+        if mode == "off":
+            return None
+        rows, columns = ans.result.rows, ans.result.columns
+        provider = provider or self.default_provider
+        if mode == "model" and provider != "local" and rows:
+            gen = None
+            try:
+                gen = self.generator_for(ans.question, provider, None, api_key, model)
+                text = gen.summarize(ans.question, columns, rows, ans.result.truncated)
+                if text:
+                    return text
+            except Exception as e:  # a summary is a nicety: never fail the answer
+                log.info("Model summary failed, using a template: %s", e)
+            finally:
+                if gen is not None and (close := getattr(gen, "close", None)):
+                    close()
+        return describe_result(columns, rows, ans.result.truncated)
 
     def run(self, sql: str) -> Answer:
         return run_sql(sql, self.engine, self.schema.dialect, self.settings.row_limit)

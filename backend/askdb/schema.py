@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 
 from sqlalchemy import Engine, inspect
+
+from askdb.linking import TOP_K, SchemaIndex
 
 
 @dataclass
@@ -13,6 +14,7 @@ class Column:
     name: str
     type: str
     primary_key: bool = False
+    comment: str | None = None
 
 
 @dataclass
@@ -27,18 +29,32 @@ class Table:
     name: str
     columns: list[Column]
     foreign_keys: list[ForeignKey] = field(default_factory=list)
+    comment: str | None = None
 
     def ddl(self) -> str:
         lines = []
         for c in self.columns:
             pk = " PRIMARY KEY" if c.primary_key else ""
-            lines.append(f"  {c.name} {c.type}{pk}")
+            note = f" -- {_one_line(c.comment)}" if c.comment else ""
+            lines.append(f"  {c.name} {c.type}{pk}{note}")
         for fk in self.foreign_keys:
             lines.append(
                 f"  FOREIGN KEY ({', '.join(fk.columns)}) "
                 f"REFERENCES {fk.ref_table}({', '.join(fk.ref_columns)})"
             )
-        return f"CREATE TABLE {self.name} (\n" + ",\n".join(lines) + "\n);"
+        head = f"-- {_one_line(self.comment)}\n" if self.comment else ""
+        # Comments go after the comma so the DDL stays valid SQL.
+        body = ""
+        for i, line in enumerate(lines):
+            sep = "," if i < len(lines) - 1 else ""
+            code, _, note = line.partition(" -- ")
+            body += f"{code}{sep}" + (f" -- {note}" if note else "") + "\n"
+        return f"{head}CREATE TABLE {self.name} (\n{body});"
+
+
+def _one_line(text: str, limit: int = 200) -> str:
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
 @dataclass
@@ -71,53 +87,25 @@ def introspect(engine: Engine) -> Schema:
     for name in sorted(insp.get_table_names()):
         pk = set(insp.get_pk_constraint(name).get("constrained_columns") or [])
         columns = [
-            Column(c["name"], str(c["type"]), c["name"] in pk) for c in insp.get_columns(name)
+            Column(c["name"], str(c["type"]), c["name"] in pk, c.get("comment") or None)
+            for c in insp.get_columns(name)
         ]
         fks = [
             ForeignKey(fk["constrained_columns"], fk["referred_table"], fk["referred_columns"])
             for fk in insp.get_foreign_keys(name)
         ]
-        tables.append(Table(name, columns, fks))
+        tables.append(Table(name, columns, fks, _table_comment(insp, name)))
     return Schema(dialect=engine.dialect.name, tables=tables)
 
 
-# Small schemas fit in the prompt whole; beyond this, link to relevant tables.
-FULL_SCHEMA_MAX_TABLES = 15
+def _table_comment(insp, name: str) -> str | None:
+    try:
+        return insp.get_table_comment(name).get("text") or None
+    except NotImplementedError:  # SQLite has no comments
+        return None
 
 
-def link_tables(schema: Schema, question: str, top_k: int = 8) -> list[Table]:
-    """Pick the tables relevant to a question.
-
-    v1 sends the whole schema when it is small. For larger schemas this uses a
-    lexical score over table/column names plus foreign-key neighbours, as a
-    stand-in for the embedding-based retrieval planned for v2.
-    """
-    if len(schema.tables) <= FULL_SCHEMA_MAX_TABLES:
-        return schema.tables
-
-    words = {_stem(w) for w in re.findall(r"[a-z]+", question.lower())}
-    scored = []
-    for t in schema.tables:
-        names = [t.name, *(c.name for c in t.columns)]
-        tokens = {_stem(tok) for n in names for tok in _split_identifier(n)}
-        score = 3 * len(words & {_stem(tok) for tok in _split_identifier(t.name)})
-        score += len(words & tokens)
-        scored.append((score, t))
-    picked = [t for s, t in sorted(scored, key=lambda x: -x[0]) if s > 0][:top_k]
-
-    by_name = {t.name: t for t in schema.tables}
-    for t in list(picked):  # pull in direct FK targets so joins are possible
-        for fk in t.foreign_keys:
-            ref = by_name.get(fk.ref_table)
-            if ref and ref not in picked:
-                picked.append(ref)
-    return picked or schema.tables
-
-
-def _split_identifier(name: str) -> list[str]:
-    parts = re.sub(r"([a-z])([A-Z])", r"\1 \2", name).replace("_", " ").lower().split()
-    return parts
-
-
-def _stem(word: str) -> str:
-    return word[:-1] if len(word) > 3 and word.endswith("s") else word
+def link_tables(schema: Schema, question: str, top_k: int = TOP_K) -> list[Table]:
+    """Pick the tables relevant to a question (keyword ranking only). The pipeline
+    keeps a SchemaIndex per database instead, which can also use embeddings."""
+    return SchemaIndex(schema).link(question, top_k)

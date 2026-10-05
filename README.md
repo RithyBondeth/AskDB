@@ -9,10 +9,14 @@ returns an error, and answers with a table and an automatically chosen chart.
 <!-- Demo GIF: start the app with a model key, run `uv run scripts/record_demo.py`
      from the repo root, then replace this comment with ![AskDB demo](docs/demo.gif) -->
 
-**Features:** upload your own data (SQLite or CSV) · follow-up questions in a chat thread · live pipeline progress
-(streamed) · self-correction you can inspect · edit and re-run the SQL ·
-sortable, filterable results with bar/line charts and CSV export · ⌘K command
-palette · share links (`?q=`) · light and dark themes.
+**Features:** upload your own data (SQLite or CSV) or connect a live PostgreSQL or
+MySQL database · a plain-language answer above every result · follow-up
+questions in a chat thread · live pipeline progress (streamed) · self-correction
+you can inspect · edit and re-run the SQL · sortable, filterable results with
+bar, line, stacked-bar, pie and scatter charts · load more rows and export every
+row to CSV · history saved on the server that follows you to other devices ·
+share links to saved answers (`?a=`) or questions (`?q=`) · 👍/👎 feedback that
+becomes prompt examples and eval cases · ⌘K command palette · light and dark themes.
 
 Works with a **free hosted model** by default (Google Gemini's free tier),
 **Claude** (Opus, Sonnet, Haiku or Fable), **Groq**, **OpenRouter**, **OpenAI**,
@@ -57,7 +61,7 @@ question
 | Stage | Code |
 | --- | --- |
 | 1. Introspection | [`backend/askdb/schema.py`](backend/askdb/schema.py) `introspect` |
-| 2. Schema linking | [`backend/askdb/schema.py`](backend/askdb/schema.py) `link_tables` |
+| 2. Schema linking | [`backend/askdb/linking.py`](backend/askdb/linking.py) `SchemaIndex` |
 | 3. Generation | Claude: [`backend/askdb/generate.py`](backend/askdb/generate.py), [`prompts.py`](backend/askdb/prompts.py). Open model: [`backend/askdb/local.py`](backend/askdb/local.py) |
 | 4. Validation | [`backend/askdb/validate.py`](backend/askdb/validate.py) |
 | 5. Execute + self-correct | [`backend/askdb/execute.py`](backend/askdb/execute.py), [`db.py`](backend/askdb/db.py) |
@@ -132,7 +136,7 @@ uv run askdb --provider local "How many tracks are in each genre?"
 
 ```bash
 cd backend && uv run pytest
-cd frontend && npm run lint && npm run build
+cd frontend && npm run lint && npm run build && npm run e2e   # e2e: browser smoke tests
 ```
 
 ## API
@@ -140,8 +144,15 @@ cd frontend && npm run lint && npm run build
 | Method | Path | Description |
 | --- | --- | --- |
 | `POST` | `/api/ask` | `{"question": "...", "provider": "claude" \| "local", "context": [{"question", "sql"}]}` → SQL, explanation, columns, rows, chart spec, every attempt, and the model that answered. `provider`, `context` (up to 5 earlier turns, for follow-ups), and `database` (an upload's id; default is the sample) are optional. `/api/run` also takes `database` |
-| `POST` | `/api/ask/stream` | Same request as `/api/ask`, answered as Server-Sent Events: `stage`, `generated`, `attempt_failed` while it runs, then `result` or `error` |
+| `POST` | `/api/ask/stream` | Same request as `/api/ask`, answered as Server-Sent Events: `stage`, `generated`, `attempt_failed` while it runs, then `result` (followed by `summary`) or `error` |
 | `POST` | `/api/run` | `{"sql": "..."}` → runs SQL you edited, behind the same read-only validation |
+| `POST` | `/api/rows` | `{"sql", "database", "offset", "limit"}` → the next page of an answer's rows (re-validated) |
+| `POST` | `/api/export` | `{"sql", "database"}` → every row as streamed CSV, up to `ASKDB_EXPORT_ROW_LIMIT` |
+| `POST` | `/api/databases/connect` | `{"url": "postgresql://...", "name"}` → connects a live PostgreSQL or MySQL database (the URL is never returned) |
+| `GET` / `DELETE` | `/api/history?database=` | This browser's saved answers, newest first / delete them |
+| `GET` / `DELETE` | `/api/history/{id}` | One saved answer (yours, or a shared one) / delete it |
+| `POST` | `/api/history/{id}/share` | `{"shared": true}` → anyone with the link can open the saved answer |
+| `POST` | `/api/feedback` | `{"answer_id", "question", "sql", "rating": 1 \| -1, "corrected_sql"}` → stores 👍/👎 |
 | `GET` | `/api/schema?database=` | Tables, columns (with primary keys), and suggested questions |
 | `GET` | `/api/databases` | The sample plus uploaded databases, and the upload limits |
 | `POST` | `/api/databases` | Multipart `files` (one SQLite file, or CSVs) and optional `name` → a new database |
@@ -165,9 +176,11 @@ anything containing writes, DDL, `PRAGMA`, `ATTACH`, `SELECT INTO`, or
 `FOR UPDATE`, plus functions that act instead of read: changing settings
 (`set_config`), sleeping, signalling or locking other sessions, reading server
 files, large objects, `dblink`, and SQLite's `load_extension`. Separately, the database connection is opened read-only (SQLite
-`mode=ro`, Postgres `default_transaction_read_only`), so a statement the parser
-misses still can't change data. `tests/test_validate.py` and
-`tests/test_execute.py` check both layers. Read-only doesn't limit what a
+`mode=ro`, Postgres `default_transaction_read_only`, MySQL/MariaDB a read-only
+session), so a statement the parser misses still can't change data. Other
+database types are refused rather than run with weaker guarantees.
+`tests/test_validate.py` and `tests/test_execute.py` check both layers, and CI
+checks the session settings against real Postgres and MySQL servers. Read-only doesn't limit what a
 `SELECT` can *read*, so on Postgres connect as a dedicated low-privilege role
 ([setup](docs/RUNNING.md#a-postgresql-role-for-askdb)): as a superuser, a query
 could read files on the database server.
@@ -195,13 +208,23 @@ model with the failed SQL, up to `ASKDB_MAX_RETRIES` (default 2) repairs.
 Blocked SQL gets a chance to be rewritten as a safe query but is never executed.
 
 **Bounded queries.** Each statement has a timeout (SQLite through a progress
-handler, Postgres through `statement_timeout`) and results are capped at
-`ASKDB_ROW_LIMIT` rows.
+handler, Postgres through `statement_timeout`, MySQL `max_execution_time`,
+MariaDB `max_statement_time`) and results are capped at `ASKDB_ROW_LIMIT` rows.
 
 **Schema linking.** Chinook has 11 tables, so the whole schema goes into the
-prompt. Above 15 tables, `link_tables` picks the relevant tables and their
-foreign-key neighbours with a keyword score. Embedding-based retrieval is the
-planned v2.
+prompt. Above 15 tables, `SchemaIndex` picks about 8: it ranks tables by BM25
+over their names, column names and comments and, when `ASKDB_EMBEDDING_MODEL`
+is set, by embedding similarity too (merged by reciprocal rank fusion). It then
+adds the tables they reference and junction tables that connect two picked
+tables, so the joins are possible. If the embedding API fails, keyword ranking
+carries on alone.
+
+**Summaries and feedback.** After the result streams in, the same model writes
+one or two sentences answering the question from the first 30 rows (the open
+model, which only writes SQL well, gets a template sentence instead). 👍 on an
+answer, or 👎 then a corrected query, is stored with the question; the most
+similar verified pairs join that browser's prompts for that database as
+few-shot examples, and `eval/export_feedback.py` turns them into eval cases.
 
 **Fixed reference date.** Chinook's invoices end in December 2013, so relative
 questions like "last quarter" are resolved against `ASKDB_REFERENCE_DATE`
@@ -290,6 +313,43 @@ results files to track accuracy across prompt and model changes. The model menu
 reads them too: each measured model shows its score (for example "89% on eval"),
 and the most accurate one of each provider gets a ★. Only full runs of 20 or
 more questions count, not `--limit` smoke runs. The dataset has 35 items.
+
+### Standard benchmarks (Spider, BIRD)
+
+Chinook's 35 questions were written for this project, so they say little about
+how AskDB compares with other systems. `eval/benchmarks.py` turns the
+[Spider](https://yale-lily.github.io/spider) or [BIRD](https://bird-bench.github.io)
+dev set (downloaded separately) into an eval set: a reproducible subset spread
+across all their databases, each question run against its own SQLite file.
+BIRD's annotator hints go with the question, as in BIRD's own setup.
+
+```bash
+cd backend
+uv run python eval/benchmarks.py spider --source ~/data/spider --limit 200
+uv run python eval/run_eval.py --dataset eval/benchmarks/spider-dev-200.jsonl \
+    --delay 5 --out eval/results/spider-gemini-free.json
+uv run python eval/compare.py --dataset spider-dev-200 --readme
+```
+
+These are execution accuracy on a subset, with AskDB's own matching rules above,
+so they're comparable across AskDB runs but not identical to the official
+leaderboards' metrics.
+
+**Spider dev** (subset):
+
+<!-- eval-table:spider:start -->
+| Model | Provider | Execution accuracy | Fixed by self-correction | Median s/question |
+| --- | --- | --- | --- | --- |
+| _not measured yet_ | | | | |
+<!-- eval-table:spider:end -->
+
+**BIRD dev** (subset):
+
+<!-- eval-table:bird:start -->
+| Model | Provider | Execution accuracy | Fixed by self-correction | Median s/question |
+| --- | --- | --- | --- | --- |
+| _not measured yet_ | | | | |
+<!-- eval-table:bird:end -->
 
 ## Project layout
 

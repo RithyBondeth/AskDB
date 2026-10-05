@@ -3,8 +3,20 @@ from pathlib import Path
 
 import pytest
 
+from api.main import app, get_store
 from askdb.db import make_engine
 from askdb.generate import Generation, Repair
+from askdb.store import Store
+
+
+@pytest.fixture(autouse=True)
+def store(tmp_path: Path):
+    """Saved answers and feedback go to a throwaway file, never data/askdb.sqlite."""
+    s = Store(tmp_path / "store.sqlite")
+    app.dependency_overrides[get_store] = lambda: s
+    yield s
+    app.dependency_overrides.pop(get_store, None)
+    s.close()
 
 
 @pytest.fixture

@@ -11,11 +11,17 @@ from askdb.sources import SourceRegistry
 
 def make_client(db_path, generator, seen_providers=None, seen_keys=None, seen_models=None):
     registry = SourceRegistry(
-        Settings(database_url=f"sqlite:///{db_path}", upload_dir=db_path.parent / "uploads")
+        Settings(
+            database_url=f"sqlite:///{db_path}",
+            upload_dir=db_path.parent / "uploads",
+            summaries="simple",  # no second model call per answer in these tests
+        )
     )
     db = registry.sample()
 
-    def fake_generator_for(question, provider=None, context=None, api_key=None, model=None):
+    def fake_generator_for(
+        question, provider=None, context=None, api_key=None, model=None, extra_examples=None
+    ):
         # no network
         if seen_providers is not None:
             seen_providers.append(provider)
@@ -109,9 +115,12 @@ def test_stream_emits_progress_then_result(db_path, scripted):
         ("stage", "validate"),
         ("stage", "execute"),
         ("result", None),
+        ("stage", "summarize"),
+        ("summary", None),
     ]
     assert events[4]["will_retry"] is True
-    assert events[-1]["data"]["rows"] == [["Ada"], ["Linus"], ["Grace"]]
+    assert events[-3]["data"]["rows"] == [["Ada"], ["Linus"], ["Grace"]]
+    assert events[-1]["text"] == "3 rows."
 
 
 def test_stream_reports_errors_as_events(db_path, scripted):
@@ -257,7 +266,8 @@ def test_ask_uses_the_chosen_model(db_path, scripted):
     assert res.status_code == 200
     assert res.json()["model"] == "claude-haiku-4-5"
     stream = client.post("/api/ask/stream", json=body)
-    assert parse_sse(stream.text)[-1]["data"]["model"] == "claude-haiku-4-5"
+    [result] = [e for e in parse_sse(stream.text) if e["type"] == "result"]
+    assert result["data"]["model"] == "claude-haiku-4-5"
     assert seen == ["claude-haiku-4-5", "claude-haiku-4-5"]
 
 

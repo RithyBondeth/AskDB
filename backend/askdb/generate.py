@@ -12,6 +12,8 @@ from askdb.prompts import (
     DATE_RULE,
     FEW_SHOT_EXAMPLES,
     REPAIR_PROMPT,
+    SUMMARY_PROMPT,
+    SUMMARY_SYSTEM,
     SYSTEM_PROMPT,
     render_examples,
 )
@@ -47,6 +49,43 @@ class Turn:
 
 class SQLGenerator(Protocol):
     def generate(self, question: str, repairs: list[Repair] | None = None) -> Generation: ...
+
+
+class Summarizer(Protocol):
+    """A generator that can also describe a result in plain language (optional)."""
+
+    def summarize(
+        self, question: str, columns: list[str], rows: list[list], truncated: bool
+    ) -> str: ...
+
+
+# How much of a result the summary prompt shows the model.
+SUMMARY_ROWS = 30
+SUMMARY_CELL_CHARS = 60
+
+
+def build_summary_prompt(
+    question: str, columns: list[str], rows: list[list], truncated: bool
+) -> str:
+    def cell(v: object) -> str:
+        text = "NULL" if v is None else str(v)
+        return text if len(text) <= SUMMARY_CELL_CHARS else text[: SUMMARY_CELL_CHARS - 1] + "…"
+
+    shown = rows[:SUMMARY_ROWS]
+    lines = [" | ".join(columns), *(" | ".join(cell(v) for v in r) for r in shown)]
+    if truncated:
+        note = f"the first {len(rows)} rows; there are more"
+    elif len(shown) < len(rows):
+        note = f"{len(shown)} of {len(rows)} rows"
+    else:
+        note = f"{len(rows)} {'row' if len(rows) == 1 else 'rows'}"
+    return SUMMARY_PROMPT.format(question=question, row_note=note, table="\n".join(lines))
+
+
+def clean_summary(text: str) -> str:
+    """One short paragraph, without the quotes or markdown models sometimes add."""
+    text = " ".join(text.replace("**", "").split()).strip().strip('"')
+    return text[:500].rsplit(" ", 1)[0] + "…" if len(text) > 500 else text
 
 
 def build_system_prompt(
@@ -155,7 +194,27 @@ class ClaudeGenerator:
             **self._model_options(),
         )
 
-    def _model_options(self) -> dict:
+    def summarize(
+        self, question: str, columns: list[str], rows: list[list], truncated: bool
+    ) -> str:
+        """One or two sentences answering the question from the result."""
+        response = self.client.beta.messages.create(
+            model=self.model,
+            max_tokens=4000,  # thinking (always on for the 5.x models) counts toward this
+            system=SUMMARY_SYSTEM,
+            messages=[
+                {
+                    "role": "user",
+                    "content": build_summary_prompt(question, columns, rows, truncated),
+                }
+            ],
+            **self._model_options(effort="low"),  # a short, simple task
+        )
+        if response.stop_reason == "refusal":
+            raise GenerationError("The model declined to summarize this result.")
+        return clean_summary("".join(b.text for b in response.content if b.type == "text"))
+
+    def _model_options(self, effort: str | None = None) -> dict:
         """Request options that differ by model."""
         if self.model.startswith("claude-haiku-4"):
             # Haiku 4.5 takes neither adaptive thinking nor effort; SQL generation
@@ -163,7 +222,7 @@ class ClaudeGenerator:
             return {}
         return {
             "thinking": {"type": "adaptive"},
-            "output_config": {"effort": self.effort},
+            "output_config": {"effort": effort or self.effort},
             # If a safety classifier declines, let the API retry on its
             # recommended fallback model instead of failing the request.
             "betas": ["server-side-fallback-2026-07-01"],

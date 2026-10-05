@@ -24,3 +24,18 @@ export function ownerId(): string {
 export function ownerHeaders(headers: Record<string, string> = {}): Record<string, string> {
   return { ...headers, [OWNER_HEADER]: ownerId() };
 }
+
+const VALID = /^[A-Za-z0-9_-]{16,128}$/;
+
+/** Adopt another browser's id (its sync code), so this browser sees that browser's
+ *  history and databases. Returns false if the code isn't a valid id. */
+export function setOwnerId(id: string): boolean {
+  const code = id.trim();
+  if (!VALID.test(code)) return false;
+  try {
+    localStorage.setItem(STORAGE_KEY, code);
+  } catch {
+    fallback = code;
+  }
+  return true;
+}

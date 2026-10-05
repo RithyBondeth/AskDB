@@ -1,14 +1,14 @@
 """The Postgres connection stays read-only and time-limited on every query.
 
-Needs a real server: set ASKDB_TEST_POSTGRES_URL (a role that may create a table,
-e.g. postgresql+psycopg://postgres@localhost/postgres) and install psycopg.
-Skipped otherwise.
+Needs a real server: set ASKDB_TEST_POSTGRES_URL to a role that may create a table,
+e.g. postgresql://postgres@localhost/postgres (CI runs one). Skipped otherwise.
 """
 
 import os
 
 import pytest
 from sqlalchemy import create_engine
+from sqlalchemy.engine import make_url
 
 from askdb.db import QueryError, make_engine, run_query
 
@@ -18,7 +18,7 @@ pytestmark = pytest.mark.skipif(not URL, reason="ASKDB_TEST_POSTGRES_URL not set
 
 @pytest.fixture
 def engine():
-    admin = create_engine(URL)
+    admin = create_engine(make_url(URL).set(drivername="postgresql+psycopg"))
     with admin.begin() as conn:
         conn.exec_driver_sql("DROP TABLE IF EXISTS askdb_test_t")
         conn.exec_driver_sql("CREATE TABLE askdb_test_t (id INT)")
@@ -55,5 +55,5 @@ def test_session_settings_changed_by_a_query_dont_carry_over(engine):
     )
     with pytest.raises(QueryError, match="read-only"):
         run_query(engine, "INSERT INTO askdb_test_t VALUES (2)", 10)
-    with pytest.raises(QueryError, match="statement timeout"):
+    with pytest.raises(QueryError, match="timed out"):
         run_query(engine, "SELECT pg_sleep(5)", 10)

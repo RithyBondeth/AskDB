@@ -6,6 +6,11 @@
     uv run python eval/run_eval.py --provider claude --model claude-haiku-4-5
     uv run python eval/run_eval.py --out eval/results/claude-v1.json
     uv run python eval/run_eval.py --delay 5             # pace requests (free-tier limits)
+    uv run python eval/run_eval.py --dataset eval/feedback.jsonl  # cases from 👍/👎 feedback
+    uv run python eval/run_eval.py --dataset eval/benchmarks/spider-dev-200.jsonl  # benchmarks.py
+
+Rows may name their own SQLite file ("database"), as benchmark rows do; the rest
+run against the configured database (ASKDB_DATABASE_URL, Chinook by default).
 
 With Claude, each question costs an API call (plus repairs). With the local open
 model it is free but slower, depending on your hardware.
@@ -36,8 +41,8 @@ RATE_LIMIT_WAIT_S = 60
 RATE_LIMIT_RETRIES = 3
 
 
-def load_dataset() -> list[dict]:
-    return [json.loads(line) for line in DATASET.read_text().splitlines() if line.strip()]
+def load_dataset(path: Path = DATASET) -> list[dict]:
+    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
 
 def is_rate_limited(e: Exception) -> bool:
@@ -89,9 +94,26 @@ def results_match(pred: list[list], gold: list[list], ordered: bool) -> bool:
     return True
 
 
+def accuracy_by(results: list[dict], key: str) -> dict[str, tuple[int, int]]:
+    """{value of `key`: (hits, total)} over the results that have it."""
+    out: dict[str, tuple[int, int]] = {}
+    for r in results:
+        if r.get(key) is None:
+            continue
+        hits, total = out.get(r[key], (0, 0))
+        out[r[key]] = (hits + bool(r["match"]), total + 1)
+    return out
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument(
+        "--dataset",
+        type=Path,
+        default=DATASET,
+        help="questions and gold SQL, one JSON object per line (default: the Chinook set)",
+    )
     parser.add_argument("--out", type=Path, default=None, help="write per-question results JSON")
     parser.add_argument(
         "--provider",
@@ -108,21 +130,37 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    rows = load_dataset()
+    rows = load_dataset(args.dataset)
     rows = rows[: args.limit] if args.limit else rows
-    db = AskDB.from_settings()
+    dataset = "chinook" if args.dataset.resolve() == DATASET.resolve() else args.dataset.stem
+    default_db = AskDB.from_settings()
+    databases: dict[str, AskDB] = {}
+
+    def database_for(row: dict) -> AskDB:
+        """The row's own database (benchmarks), else the configured one."""
+        path = row.get("database")
+        if not path:
+            return default_db
+        if path not in databases:
+            databases[path] = AskDB.for_database(f"sqlite:///{path}", default_db.settings)
+        return databases[path]
+
+    db = default_db
     provider = args.provider or db.default_provider
     # Runs on the server's keys, so the ASKDB_*_MODELS allowlists apply.
     model = resolve_model(db.settings, provider, args.model, None)
-    print(f"Provider: {provider} ({model})\n")
+    print(f"Dataset: {dataset} ({len(rows)} questions)\nProvider: {provider} ({model})\n")
 
     results, hits, self_corrected = [], 0, 0
     for i, row in enumerate(rows):
         if i and args.delay:
             time.sleep(args.delay)
         started = time.monotonic()
+        db = database_for(row)
         gold = run_query(db.engine, row["gold_sql"], COMPARE_LIMIT).rows
         record: dict[str, Any] = {"id": row["id"], "question": row["question"]}
+        if row.get("difficulty"):
+            record["difficulty"] = row["difficulty"]
         try:
             for retry in range(RATE_LIMIT_RETRIES + 1):
                 try:
@@ -150,10 +188,14 @@ def main() -> int:
     accuracy = hits / total if total else 0.0
     print(f"\nExecution accuracy: {hits}/{total} = {accuracy:.1%}")
     print(f"Passed only after self-correction: {self_corrected}")
+    by_difficulty = accuracy_by(results, "difficulty")
+    for level, (n_ok, n) in by_difficulty.items():
+        print(f"  {level}: {n_ok}/{n} = {n_ok / n:.1%}")
 
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         summary = {
+            "dataset": dataset,
             "provider": provider,
             "model": model,
             "effort": db.settings.effort if provider == "claude" else None,
@@ -161,6 +203,7 @@ def main() -> int:
             "hits": hits,
             "total": total,
             "self_corrected": self_corrected,
+            "by_difficulty": {k: {"hits": h, "total": n} for k, (h, n) in by_difficulty.items()},
             "median_seconds": sorted(r["seconds"] for r in results)[total // 2] if total else 0,
             "results": results,
         }

@@ -1,7 +1,8 @@
 """Eval scores for the model menu: how accurate each measured model was.
 
 Reads the result files ``eval/run_eval.py --out`` writes (``eval/results/*.json``).
-A model is labelled only from a full run, never from a ``--limit`` smoke run,
+A model is labelled only from a full Chinook run, never from a ``--limit`` smoke
+run or a benchmark (Spider, BIRD) run,
 and the most accurate measured model of each provider is marked recommended.
 With no result files, nothing is labelled.
 """
@@ -60,6 +61,8 @@ def load_scores(results_dir: Path) -> dict[tuple[str, str], Score]:
             continue  # not a results file, or an older format
         if total < MIN_QUESTIONS:
             continue
+        if run.get("dataset", "chinook") != "chinook":
+            continue  # benchmark runs have their own tables; the menu shows Chinook
         mtime = f.stat().st_mtime
         if key not in newest or mtime >= newest[key][0]:
             newest[key] = (mtime, score)

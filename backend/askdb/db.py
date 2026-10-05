@@ -1,19 +1,30 @@
 """Read-only database access.
 
-The SQL validator is the first safety layer; this module is the second. The
-connection itself is opened read-only wherever the backend supports it, so even
-a statement that slips past the parser cannot modify data.
+The SQL validator is the first safety layer; this module is the second. Every
+connection is opened read-only and with a statement timeout, so even a statement
+that slips past the parser cannot modify data or run forever:
+
+- SQLite: ``mode=ro`` URI, timeout via the progress handler
+- PostgreSQL: ``default_transaction_read_only`` and ``statement_timeout``
+- MySQL / MariaDB: ``SET SESSION TRANSACTION READ ONLY`` and
+  ``max_execution_time`` (MySQL) or ``max_statement_time`` (MariaDB)
+
+Other databases are refused rather than run with weaker guarantees.
 """
 
 from __future__ import annotations
 
 import sqlite3
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import Engine, create_engine, event
 from sqlalchemy.engine import make_url
+
+# How long to wait for a network database to accept a connection.
+CONNECT_TIMEOUT_S = 10
 
 
 class QueryError(Exception):
@@ -46,22 +57,41 @@ def make_engine(database_url: str, timeout_s: float) -> Engine:
 
         return create_engine("sqlite://", creator=connect)
 
-    if backend == "postgresql":
-        ms = int(timeout_s * 1000)
+    ms = int(timeout_s * 1000)
+    if backend in ("postgresql", "postgres"):  # "postgres://" is common in hosted URLs
         return create_engine(
-            url,
+            url.set(drivername="postgresql+psycopg"),
+            pool_pre_ping=True,
             connect_args={
-                "options": f"-c default_transaction_read_only=on -c statement_timeout={ms}"
+                "connect_timeout": CONNECT_TIMEOUT_S,
+                "options": f"-c default_transaction_read_only=on -c statement_timeout={ms}",
             },
         )
 
-    engine = create_engine(url)
+    if backend in ("mysql", "mariadb"):
+        engine = create_engine(
+            url.set(drivername=f"{backend}+pymysql"),
+            pool_pre_ping=True,
+            connect_args={"connect_timeout": CONNECT_TIMEOUT_S},
+        )
 
-    @event.listens_for(engine, "begin")
-    def _read_only(conn):  # pragma: no cover - backend specific
-        conn.exec_driver_sql("SET TRANSACTION READ ONLY")
+        @event.listens_for(engine, "connect")
+        def _session(dbapi_conn, _record):
+            with dbapi_conn.cursor() as cur:
+                cur.execute("SET SESSION TRANSACTION READ ONLY")
+                cur.execute("SELECT VERSION()")
+                if "mariadb" in str(cur.fetchone()[0]).lower():
+                    # MariaDB has no max_execution_time; its limit is in seconds.
+                    cur.execute(f"SET SESSION max_statement_time = {timeout_s:g}")
+                else:
+                    cur.execute(f"SET SESSION max_execution_time = {ms}")
 
-    return engine
+        return engine
+
+    # Anything else would get neither a guaranteed read-only session nor a timeout.
+    raise ValueError(
+        f"AskDB supports SQLite, PostgreSQL and MySQL/MariaDB databases, not {backend!r}."
+    )
 
 
 def _install_sqlite_timeout(conn: sqlite3.Connection, timeout_s: float) -> None:
@@ -78,11 +108,19 @@ def _install_sqlite_timeout(conn: sqlite3.Connection, timeout_s: float) -> None:
     conn.set_trace_callback(reset)  # called at the start of every statement
 
 
-def run_query(engine: Engine, sql: str, row_limit: int) -> QueryResult:
+def run_query(engine: Engine, sql: str, row_limit: int, offset: int = 0) -> QueryResult:
+    """Run a query and return up to `row_limit` rows, after skipping `offset` rows.
+    Rows are skipped client-side so the SQL itself is never rewritten."""
     try:
         with engine.connect() as conn:
             result = conn.exec_driver_sql(sql)
             columns = list(result.keys())
+            skipped = 0
+            while skipped < offset:
+                chunk = result.fetchmany(min(1000, offset - skipped))
+                if not chunk:
+                    break
+                skipped += len(chunk)
             fetched = result.fetchmany(row_limit + 1)
     except Exception as e:  # driver errors vary by backend
         raise QueryError(_clean_error(e)) from e
@@ -90,9 +128,45 @@ def run_query(engine: Engine, sql: str, row_limit: int) -> QueryResult:
     return QueryResult(columns=columns, rows=rows, truncated=len(fetched) > row_limit)
 
 
+def iter_query(engine: Engine, sql: str, max_rows: int) -> tuple[list[str], Iterator[list[Any]]]:
+    """Columns, then rows streamed one at a time (at most `max_rows`), for exports
+    too big to hold in memory. Errors before the first row raise QueryError."""
+    conn = engine.connect()
+    try:
+        result = conn.execution_options(stream_results=True).exec_driver_sql(sql)
+        columns = list(result.keys())
+    except Exception as e:
+        conn.close()
+        raise QueryError(_clean_error(e)) from e
+
+    def rows() -> Iterator[list[Any]]:
+        try:
+            sent = 0
+            while sent < max_rows:
+                chunk = result.fetchmany(min(1000, max_rows - sent))
+                if not chunk:
+                    return
+                sent += len(chunk)
+                yield from (list(r) for r in chunk)
+        finally:
+            conn.close()
+
+    return columns, rows()
+
+
+# How each database reports a cancelled statement: SQLite (progress handler),
+# PostgreSQL (statement_timeout), MySQL and MariaDB.
+_TIMEOUT_SIGNS = (
+    "interrupted",
+    "statement timeout",
+    "max_statement_time",
+    "execution time exceeded",
+)
+
+
 def _clean_error(e: Exception) -> str:
     orig = getattr(e, "orig", None)
     msg = str(orig or e)
-    if "interrupted" in msg.lower():
+    if any(sign in msg.lower() for sign in _TIMEOUT_SIGNS):
         return "Query timed out and was cancelled."
     return msg.split("\n[SQL:")[0].strip()

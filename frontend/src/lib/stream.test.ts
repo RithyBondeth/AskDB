@@ -40,6 +40,34 @@ describe("askStream", () => {
     expect(events.map((e) => e.type)).toEqual(["stage", "result"]);
   });
 
+  it("delivers the result at once, then resolves with the summary added", async () => {
+    const res = `data: ${JSON.stringify({ type: "result", data: result })}\n\n`;
+    const sum = `data: ${JSON.stringify({ type: "summary", text: "One row." })}\n\n`;
+    serve([res, sum], sse);
+    const events: StreamEvent[] = [];
+    await expect(askStream(opts(events))).resolves.toEqual({ ...result, summary: "One row." });
+    expect(events.map((e) => e.type)).toEqual(["result", "summary"]);
+  });
+
+  it("keeps the result when the stream breaks before the summary", async () => {
+    let pulls = 0;
+    const body = new ReadableStream({
+      pull(controller) {
+        if (pulls++ === 0) {
+          const res = `data: ${JSON.stringify({ type: "result", data: result })}\n\n`;
+          controller.enqueue(new TextEncoder().encode(res));
+        } else {
+          controller.error(new Error("connection reset"));
+        }
+      },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(body, sse)),
+    );
+    await expect(askStream(opts())).resolves.toEqual(result);
+  });
+
   it("sends the browser id and the user's key", async () => {
     const fetch = serve([`data: ${JSON.stringify({ type: "result", data: result })}\n\n`], sse);
     await askStream({ ...opts(), apiKey: "k" });

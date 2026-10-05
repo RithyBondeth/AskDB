@@ -1,23 +1,47 @@
 "use client";
 
-import { ChevronRight, Database, History, KeyRound, Plus, Search, Trash2, X } from "lucide-react";
+import {
+  ChevronRight,
+  Database,
+  History,
+  KeyRound,
+  Laptop,
+  Plus,
+  Search,
+  ThumbsDown,
+  ThumbsUp,
+  Trash2,
+  X,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import Doodle from "@/components/Doodle";
 import type { SchemaResponse } from "@/lib/types";
 
+/** A recent question: a saved answer on the server (with an id), or just the question. */
+export interface HistoryItem {
+  id?: string;
+  question: string;
+  rating?: 1 | -1 | null;
+}
+
 export default function Sidebar({
   history,
   onPick,
+  onDelete,
   onClearHistory,
+  onSync,
   onInsert,
   disabled,
   schema,
   schemaFailed,
 }: {
-  history: string[];
-  onPick: (q: string) => void;
+  history: HistoryItem[];
+  onPick: (item: HistoryItem) => void;
+  onDelete: (item: HistoryItem) => void;
   onClearHistory: () => void;
+  /** Open the "use on another device" dialog (only when history is kept on the server). */
+  onSync: (() => void) | null;
   onInsert: (text: string) => void;
   disabled: boolean;
   schema: SchemaResponse | null;
@@ -28,7 +52,9 @@ export default function Sidebar({
       <HistoryPanel
         history={history}
         onPick={onPick}
+        onDelete={onDelete}
         onClear={onClearHistory}
+        onSync={onSync}
         disabled={disabled}
       />
       <SchemaPanel schema={schema} failed={schemaFailed} onInsert={onInsert} />
@@ -105,12 +131,16 @@ function PanelTitle({
 function HistoryPanel({
   history,
   onPick,
+  onDelete,
   onClear,
+  onSync,
   disabled,
 }: {
-  history: string[];
-  onPick: (q: string) => void;
+  history: HistoryItem[];
+  onPick: (item: HistoryItem) => void;
+  onDelete: (item: HistoryItem) => void;
   onClear: () => void;
+  onSync: (() => void) | null;
   disabled: boolean;
 }) {
   return (
@@ -123,6 +153,7 @@ function HistoryPanel({
               type="button"
               onClick={onClear}
               aria-label="Clear history"
+              title="Clear history for this database"
               className="grid size-7 place-items-center rounded-md text-subtle transition hover:bg-surface-2 hover:text-foreground"
             >
               <Trash2 className="size-3.5" />
@@ -138,21 +169,49 @@ function HistoryPanel({
           <p className="text-xs text-subtle">Questions you ask appear here.</p>
         </div>
       ) : (
-        <ul className="-mx-1 flex flex-col">
-          {history.map((q) => (
-            <li key={q}>
+        <ul className="-mx-1 flex max-h-[40vh] flex-col overflow-y-auto">
+          {history.map((item) => (
+            <li
+              key={item.id ?? item.question}
+              className="group flex items-center rounded-md hover:bg-surface-2"
+            >
               <button
                 type="button"
                 disabled={disabled}
-                onClick={() => onPick(q)}
-                className="w-full truncate rounded-md px-2 py-1.5 text-left text-sm text-muted transition hover:bg-surface-2 hover:text-foreground disabled:opacity-50"
-                title={q}
+                onClick={() => onPick(item)}
+                className="flex min-w-0 flex-1 items-center gap-1.5 px-2 py-1.5 text-left text-sm text-muted transition group-hover:text-foreground disabled:opacity-50"
+                title={item.id ? `Open the saved answer: ${item.question}` : item.question}
               >
-                {q}
+                <span className="truncate">{item.question}</span>
+                {item.rating === 1 && (
+                  <ThumbsUp className="size-3 shrink-0 text-success" aria-label="Rated correct" />
+                )}
+                {item.rating === -1 && (
+                  <ThumbsDown className="size-3 shrink-0 text-danger" aria-label="Rated wrong" />
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => onDelete(item)}
+                aria-label={`Remove “${item.question}” from history`}
+                title="Remove from history"
+                className="mr-1 hidden size-6 shrink-0 place-items-center rounded text-subtle hover:bg-danger-soft hover:text-danger group-hover:grid"
+              >
+                <X className="size-3.5" />
               </button>
             </li>
           ))}
         </ul>
+      )}
+      {onSync && (
+        <button
+          type="button"
+          onClick={onSync}
+          className="mt-2 inline-flex items-center gap-1.5 text-xs text-subtle underline decoration-dotted underline-offset-2 hover:text-foreground"
+        >
+          <Laptop className="size-3.5" />
+          Use your history on another device
+        </button>
       )}
     </div>
   );
