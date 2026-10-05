@@ -162,7 +162,9 @@ UI can show what was tried.
 `validate.py` parses the SQL with sqlglot and accepts exactly one `SELECT` or
 `UNION`/`INTERSECT`/`EXCEPT` statement. It rejects stacked statements and
 anything containing writes, DDL, `PRAGMA`, `ATTACH`, `SELECT INTO`, or
-`FOR UPDATE`. Separately, the database connection is opened read-only (SQLite
+`FOR UPDATE`, plus functions that act instead of read: changing settings
+(`set_config`), sleeping, signalling or locking other sessions, reading server
+files, large objects, `dblink`, and SQLite's `load_extension`. Separately, the database connection is opened read-only (SQLite
 `mode=ro`, Postgres `default_transaction_read_only`), so a statement the parser
 misses still can't change data. `tests/test_validate.py` and
 `tests/test_execute.py` check both layers. Read-only doesn't limit what a
