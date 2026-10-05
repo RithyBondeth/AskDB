@@ -422,7 +422,13 @@ def test_connect_endpoint_needs_an_owner_and_reports_errors(client):
 LIVE_DATABASES = [
     # kind, env var with a disposable database's URL, a query that runs too long
     ("postgres", "ASKDB_TEST_POSTGRES_URL", "SELECT pg_sleep(5)"),
-    ("mysql", "ASKDB_TEST_MYSQL_URL", "SELECT SLEEP(5)"),
+    # Not SLEEP(): MySQL cuts it short at the limit but returns 1 instead of an error.
+    (
+        "mysql",
+        "ASKDB_TEST_MYSQL_URL",
+        "SELECT COUNT(*) FROM information_schema.columns a, information_schema.columns b, "
+        "information_schema.columns c",
+    ),
 ]
 
 
