@@ -53,7 +53,6 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 ```bash
 git clone https://github.com/RithyBondeth/AskDB.git
 cd AskDB
-git checkout bondeth/fervent-fermat-ua5zok   # until this branch is merged into main
 ```
 
 ---
