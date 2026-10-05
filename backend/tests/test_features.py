@@ -196,6 +196,13 @@ def test_embeddings_find_tables_keywords_miss():
     assert index.embedder.calls == 3
 
 
+def test_embeddings_work_right_after_boot(monkeypatch):
+    # time.monotonic() counts from boot: a fresh container is at a few seconds.
+    monkeypatch.setattr("askdb.linking.time.monotonic", lambda: 5.0)
+    index = SchemaIndex(big_schema(), FakeEmbedder())
+    assert index.link("how much did people spend")[0].name == "invoice"
+
+
 def test_failing_embeddings_fall_back_to_keywords():
     index = SchemaIndex(big_schema(), FakeEmbedder(fail=True))
     assert "customer" in {t.name for t in index.link("customers by country")}

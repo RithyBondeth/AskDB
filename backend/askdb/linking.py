@@ -124,7 +124,7 @@ class SchemaIndex:
         n = len(self._docs)
         self._idf = {t: math.log(1 + (n - f + 0.5) / (f + 0.5)) for t, f in df.items()}
         self._table_vectors: list[list[float]] | None = None
-        self._embed_failed_at = 0.0
+        self._embed_failed_at: float | None = None  # monotonic time of the last failure
         self._lock = threading.Lock()
 
     # ------------------------------------------------------------ scoring
@@ -145,7 +145,10 @@ class SchemaIndex:
     def semantic(self, question: str) -> list[float] | None:
         """Cosine similarity of the question to each table, or None when embeddings
         are off or failing."""
-        if self.embedder is None or time.monotonic() - self._embed_failed_at < EMBED_RETRY_S:
+        if self.embedder is None:
+            return None
+        failed = self._embed_failed_at
+        if failed is not None and time.monotonic() - failed < EMBED_RETRY_S:
             return None
         try:
             with self._lock:
