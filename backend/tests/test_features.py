@@ -3,13 +3,14 @@ live connections."""
 
 import json
 import os
+import re
 
 import pytest
 from fastapi.testclient import TestClient
 
 from api.main import app, get_registry
 from askdb.config import Settings
-from askdb.db import run_query
+from askdb.db import QueryError, make_engine, run_query
 from askdb.generate import Generation, build_summary_prompt, clean_summary
 from askdb.importers import UploadError
 from askdb.linking import SchemaIndex, split_identifier, stem
@@ -411,23 +412,31 @@ def test_connect_endpoint_needs_an_owner_and_reports_errors(client):
     assert res.status_code == 400 and "PostgreSQL" in res.json()["detail"]["message"]
 
 
-@pytest.mark.skipif(
-    not os.environ.get("ASKDB_TEST_POSTGRES_URL"),
-    reason="set ASKDB_TEST_POSTGRES_URL to a disposable Postgres database to run",
-)
-def test_live_postgres_connection(client, registry):
-    url = os.environ["ASKDB_TEST_POSTGRES_URL"]
-    res = client.post("/api/databases/connect", json={"url": url, "name": "pg"}, headers=headers())
+LIVE_DATABASES = [
+    # kind, env var with a disposable database's URL, a query that runs too long
+    ("postgres", "ASKDB_TEST_POSTGRES_URL", "SELECT pg_sleep(5)"),
+    ("mysql", "ASKDB_TEST_MYSQL_URL", "SELECT SLEEP(5)"),
+]
+
+
+@pytest.mark.parametrize("kind,env,slow_sql", LIVE_DATABASES, ids=[d[0] for d in LIVE_DATABASES])
+def test_live_database_connection(client, registry, kind, env, slow_sql):
+    """Against a real server (CI runs Postgres and MySQL services). Use a user that
+    *can* write, to show the session itself is read-only."""
+    url = os.environ.get(env)
+    if not url:
+        pytest.skip(f"set {env} to a disposable {kind} database to run")
+    registry.settings.statement_timeout_s = 1
+    res = client.post("/api/databases/connect", json={"url": url, "name": kind}, headers=headers())
     assert res.status_code == 200, res.text
     info = res.json()
-    assert (
-        info["kind"] == "postgres" and "url" not in info and ":" not in info["detail"].split("@")[0]
-    )
+    assert info["kind"] == kind and "url" not in info
+    assert ":" not in info["detail"].split("@")[0]  # no password in the display form
     listed = client.get("/api/databases", headers=headers()).json()["databases"]
     assert info["id"] in [d["id"] for d in listed]
-    assert info["id"] not in [
-        d["id"] for d in client.get("/api/databases", headers=headers(YOU)).json()["databases"]
-    ]
+    theirs = client.get("/api/databases", headers=headers(YOU)).json()["databases"]
+    assert info["id"] not in [d["id"] for d in theirs]
+
     db = registry.get(info["id"], ME)
     table = db.schema.tables[0].name
     ok = client.post(
@@ -436,7 +445,15 @@ def test_live_postgres_connection(client, registry):
         headers=headers(),
     )
     assert ok.status_code == 200, ok.text
-    # The connection is read-only even if a write slipped past the validator.
-    with pytest.raises(Exception, match="read-only"):
+    # Read-only and time-limited even for statements that slip past the validator.
+    with pytest.raises(QueryError, match=re.compile("read.only", re.I)):
         run_query(db.engine, f"DELETE FROM {table}", 10)
+    with pytest.raises(QueryError, match="timed out"):
+        run_query(db.engine, slow_sql, 10)
     assert client.delete(f"/api/databases/{info['id']}", headers=headers()).status_code == 200
+
+
+def test_unsupported_databases_are_refused():
+    for url in ("mssql+pyodbc://u:p@host/db", "oracle://u:p@host/db"):
+        with pytest.raises(ValueError, match="supports SQLite, PostgreSQL and MySQL"):
+            make_engine(url, 5)

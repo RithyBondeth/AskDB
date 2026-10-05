@@ -13,7 +13,7 @@ dependencies = [
     "httpx>=0.27",
     "python-multipart>=0.0.32",
     "psycopg[binary]>=3.2",
-    "pymysql>=1.1",
+    "pymysql[rsa]>=1.1",  # rsa: MySQL 8's default caching_sha2_password login
 ]
 
 [dependency-groups]

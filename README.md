@@ -136,7 +136,7 @@ uv run askdb --provider local "How many tracks are in each genre?"
 
 ```bash
 cd backend && uv run pytest
-cd frontend && npm run lint && npm run build
+cd frontend && npm run lint && npm run build && npm run e2e   # e2e: browser smoke tests
 ```
 
 ## API
@@ -174,9 +174,11 @@ UI can show what was tried.
 `UNION`/`INTERSECT`/`EXCEPT` statement. It rejects stacked statements and
 anything containing writes, DDL, `PRAGMA`, `ATTACH`, `SELECT INTO`, or
 `FOR UPDATE`. Separately, the database connection is opened read-only (SQLite
-`mode=ro`, Postgres `default_transaction_read_only`), so a statement the parser
-misses still can't change data. `tests/test_validate.py` and
-`tests/test_execute.py` check both layers. Read-only doesn't limit what a
+`mode=ro`, Postgres `default_transaction_read_only`, MySQL/MariaDB a read-only
+session), so a statement the parser misses still can't change data. Other
+database types are refused rather than run with weaker guarantees.
+`tests/test_validate.py` and `tests/test_execute.py` check both layers, and CI
+checks the session settings against real Postgres and MySQL servers. Read-only doesn't limit what a
 `SELECT` can *read*, so on Postgres connect as a dedicated low-privilege role
 ([setup](docs/RUNNING.md#a-postgresql-role-for-askdb)): as a superuser, a query
 could read files on the database server.
@@ -204,8 +206,8 @@ model with the failed SQL, up to `ASKDB_MAX_RETRIES` (default 2) repairs.
 Blocked SQL gets a chance to be rewritten as a safe query but is never executed.
 
 **Bounded queries.** Each statement has a timeout (SQLite through a progress
-handler, Postgres through `statement_timeout`) and results are capped at
-`ASKDB_ROW_LIMIT` rows.
+handler, Postgres through `statement_timeout`, MySQL `max_execution_time`,
+MariaDB `max_statement_time`) and results are capped at `ASKDB_ROW_LIMIT` rows.
 
 **Schema linking.** Chinook has 11 tables, so the whole schema goes into the
 prompt. Above 15 tables, `SchemaIndex` picks about 8: it ranks tables by BM25
@@ -309,6 +311,43 @@ results files to track accuracy across prompt and model changes. The model menu
 reads them too: each measured model shows its score (for example "89% on eval"),
 and the most accurate one of each provider gets a ★. Only full runs of 20 or
 more questions count, not `--limit` smoke runs. The dataset has 35 items.
+
+### Standard benchmarks (Spider, BIRD)
+
+Chinook's 35 questions were written for this project, so they say little about
+how AskDB compares with other systems. `eval/benchmarks.py` turns the
+[Spider](https://yale-lily.github.io/spider) or [BIRD](https://bird-bench.github.io)
+dev set (downloaded separately) into an eval set: a reproducible subset spread
+across all their databases, each question run against its own SQLite file.
+BIRD's annotator hints go with the question, as in BIRD's own setup.
+
+```bash
+cd backend
+uv run python eval/benchmarks.py spider --source ~/data/spider --limit 200
+uv run python eval/run_eval.py --dataset eval/benchmarks/spider-dev-200.jsonl \
+    --delay 5 --out eval/results/spider-gemini-free.json
+uv run python eval/compare.py --dataset spider-dev-200 --readme
+```
+
+These are execution accuracy on a subset, with AskDB's own matching rules above,
+so they're comparable across AskDB runs but not identical to the official
+leaderboards' metrics.
+
+**Spider dev** (subset):
+
+<!-- eval-table:spider:start -->
+| Model | Provider | Execution accuracy | Fixed by self-correction | Median s/question |
+| --- | --- | --- | --- | --- |
+| _not measured yet_ | | | | |
+<!-- eval-table:spider:end -->
+
+**BIRD dev** (subset):
+
+<!-- eval-table:bird:start -->
+| Model | Provider | Execution accuracy | Fixed by self-correction | Median s/question |
+| --- | --- | --- | --- | --- |
+| _not measured yet_ | | | | |
+<!-- eval-table:bird:end -->
 
 ## Project layout
 

@@ -349,12 +349,30 @@ uv run ruff check .      # lint
 uv run ruff format .     # auto-format
 ```
 
+Live database tests run only when given a disposable database (they create and
+drop a table): set `ASKDB_TEST_POSTGRES_URL` and/or `ASKDB_TEST_MYSQL_URL`, run
+`uv run python tests/seed_live_db.py "$ASKDB_TEST_POSTGRES_URL"`, then `uv run pytest`.
+CI does this with Postgres and MySQL containers.
+
 **Frontend:**
 
 ```bash
 cd frontend
 npm run lint
+npm test                 # unit tests
 npm run build            # production build; catches type errors
+```
+
+**Browser smoke tests** (Playwright): start the real backend and frontend with a
+mock model that returns canned SQL, then ask questions, check the chart and table,
+self-correction, the read-only block on edited SQL, a CSV upload, and a share link.
+No API key needed.
+
+```bash
+cd frontend
+npx playwright install chromium   # once
+npm run build
+npm run e2e
 ```
 
 ---
@@ -498,7 +516,7 @@ Point `ASKDB_DATABASE_URL` at it and restart the backend:
 # SQLite file
 ASKDB_DATABASE_URL=sqlite:////absolute/path/to/my.db
 
-# PostgreSQL or MySQL (drivers are included)
+# PostgreSQL, MySQL or MariaDB (drivers are included; other databases are refused)
 ASKDB_DATABASE_URL=postgresql://readonly_user:password@localhost:5432/mydb
 ASKDB_DATABASE_URL=mysql://readonly_user:password@localhost:3306/mydb
 ```

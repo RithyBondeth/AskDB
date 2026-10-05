@@ -26,3 +26,6 @@ next-env.d.ts
 # Uploaded databases, connections, saved answers and feedback (user data)
 backend/data/uploads/
 backend/data/askdb.sqlite*
+
+# Benchmark subsets (eval/benchmarks.py) name local database paths
+backend/eval/benchmarks/
