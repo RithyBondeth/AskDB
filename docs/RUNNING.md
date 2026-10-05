@@ -565,6 +565,28 @@ databases than on PostgreSQL.
 
 ---
 
+## Deploying (Docker, Railway)
+
+`backend/Dockerfile` and `frontend/Dockerfile` build the two parts as containers.
+The frontend needs `ASKDB_API_URL` pointing at the backend; the backend keeps
+uploads, connections, saved answers and feedback wherever `ASKDB_UPLOAD_DIR` and
+`ASKDB_STORE_PATH` say, so put those on a persistent volume.
+
+On [Railway](https://railway.com): one project, two services from this repo, with
+root directories `/backend` and `/frontend` (each has a `railway.toml` that picks
+its Dockerfile and health check). Then:
+
+- **backend:** a volume mounted at `/data`, and variables
+  `ASKDB_UPLOAD_DIR=/data/uploads`, `ASKDB_STORE_PATH=/data/askdb.sqlite`,
+  `ASKDB_ALLOW_PRIVATE_HOSTS=false` (so visitors can't connect to addresses on
+  Railway's private network). No public domain needed.
+- **frontend:** `ASKDB_API_URL=http://${{backend.RAILWAY_PRIVATE_DOMAIN}}:8000`
+  and a public domain.
+- Optional, on the backend: `ASKDB_FREE_API_KEY` (or another provider's key) so
+  visitors can ask without their own key. Every visitor spends it.
+
+---
+
 ## 11. Troubleshooting
 
 | Problem | Likely cause and fix |

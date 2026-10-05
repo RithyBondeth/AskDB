@@ -1,0 +1,9 @@
+# Railway: build backend/Dockerfile (set the service's root directory to /backend).
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+healthcheckPath = "/api/health"
+healthcheckTimeout = 120
+restartPolicyType = "ON_FAILURE"
