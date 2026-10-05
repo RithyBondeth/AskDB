@@ -1,57 +1,38 @@
 "use client";
 
-import { Bot, Check, Eye, EyeOff, Gift, KeyRound, Loader2, ShieldCheck, X } from "lucide-react";
+import { Check, Eye, EyeOff, KeyRound, Loader2, ShieldCheck, X } from "lucide-react";
 import { useState } from "react";
 
 import { type ApiKeys, type KeyProvider, maskKey } from "@/lib/keys";
+import { PROVIDERS } from "@/lib/providers";
 import { checkKey } from "@/lib/stream";
 
-const FIELDS: {
-  id: KeyProvider;
-  label: string;
-  icon: typeof Bot;
-  hint: React.ReactNode;
-  placeholder: string;
-}[] = [
-  {
-    id: "free",
-    label: "Free model (Google Gemini)",
-    icon: Gift,
-    placeholder: "AIza…",
-    hint: (
-      <>
-        Free, no credit card:{" "}
-        <a
-          href="https://aistudio.google.com/apikey"
-          target="_blank"
-          rel="noreferrer"
-          className="font-semibold text-accent-ink underline underline-offset-2"
-        >
-          aistudio.google.com/apikey
-        </a>
-      </>
-    ),
-  },
-  {
-    id: "claude",
-    label: "Claude (Anthropic)",
-    icon: Bot,
-    placeholder: "sk-ant-…",
-    hint: (
-      <>
-        Paid, from{" "}
-        <a
-          href="https://platform.claude.com/"
-          target="_blank"
-          rel="noreferrer"
-          className="font-semibold text-accent-ink underline underline-offset-2"
-        >
-          platform.claude.com
-        </a>
-      </>
-    ),
-  },
-];
+// Every provider that takes a key, in menu order.
+const FIELDS = PROVIDERS.flatMap(({ id, label, icon, blurb, key }) =>
+  key && id !== "local"
+    ? [
+        {
+          id: id as KeyProvider,
+          label,
+          icon,
+          placeholder: key.placeholder,
+          hint: (
+            <>
+              {blurb}. {key.free ? "Free key" : "Paid key"} from{" "}
+              <a
+                href={key.url}
+                target="_blank"
+                rel="noreferrer"
+                className="font-semibold text-accent-ink underline underline-offset-2"
+              >
+                {key.site}
+              </a>
+            </>
+          ),
+        },
+      ]
+    : [],
+);
 
 type Check = { state: "checking" } | { state: "done"; ok: boolean; message: string };
 
@@ -86,10 +67,13 @@ function Form({
   onSave: (keys: ApiKeys) => void;
   serverKeys: Partial<Record<KeyProvider, boolean>>;
 }) {
-  const [draft, setDraft] = useState<Record<KeyProvider, string>>({
-    free: keys.free ?? "",
-    claude: keys.claude ?? "",
-  });
+  const [draft, setDraft] = useState<Record<KeyProvider, string>>(
+    () =>
+      Object.fromEntries(FIELDS.map(({ id }) => [id, keys[id] ?? ""])) as Record<
+        KeyProvider,
+        string
+      >,
+  );
   const [shown, setShown] = useState<Partial<Record<KeyProvider, boolean>>>({});
   const [checks, setChecks] = useState<Partial<Record<KeyProvider, Check>>>({});
 
@@ -124,7 +108,7 @@ function Form({
           e.preventDefault();
           save();
         }}
-        className="card animate-pop-in relative w-full max-w-lg p-5 shadow-2xl"
+        className="card animate-pop-in relative max-h-[84vh] w-full max-w-lg overflow-y-auto p-5 shadow-2xl"
       >
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -133,7 +117,9 @@ function Form({
               Your API keys
             </h2>
             <p className="mt-1 text-sm text-muted">
-              AskDB uses your own key to talk to the model. You only need one.
+              AskDB uses your own key to talk to the model. You only need one, for the provider you
+              pick under the question box. Your own key also unlocks every model that provider
+              offers you.
             </p>
           </div>
           <button

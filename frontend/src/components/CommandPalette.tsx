@@ -1,11 +1,8 @@
 "use client";
 
 import {
-  Bot,
   CornerDownLeft,
-  Cpu,
   Database,
-  Gift,
   History,
   KeyRound,
   Lightbulb,
@@ -17,6 +14,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { PROVIDERS } from "@/lib/providers";
 import type { DatabaseInfo, Provider } from "@/lib/types";
 
 export interface Command {
@@ -67,27 +65,13 @@ export function buildCommands({
         ]
       : []),
     { id: "keys", group: "Actions", label: "API keys…", icon: KeyRound, run: openKeys },
-    {
-      id: "claude",
-      group: "Actions",
-      label: "Use Claude",
-      icon: Bot,
-      run: () => setProvider("claude"),
-    },
-    {
-      id: "free",
-      group: "Actions",
-      label: "Use the free model",
-      icon: Gift,
-      run: () => setProvider("free"),
-    },
-    {
-      id: "local",
-      group: "Actions",
-      label: "Use the open model",
-      icon: Cpu,
-      run: () => setProvider("local"),
-    },
+    ...PROVIDERS.map((p) => ({
+      id: `provider-${p.id}`,
+      group: "Actions" as const,
+      label: `Use ${p.label}`,
+      icon: p.icon,
+      run: () => setProvider(p.id),
+    })),
     {
       id: "theme",
       group: "Actions",

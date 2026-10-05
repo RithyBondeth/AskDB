@@ -87,21 +87,41 @@ ANTHROPIC_API_KEY=sk-ant-...   # only for Claude
 A key a user adds in the browser always takes precedence over the server's. Be
 careful with a server key on a public deployment: every visitor spends it.
 
-**Using a different free service.** Any OpenAI-compatible chat API works. Set
-the base URL and model as well as the key, then restart the backend:
+**Other providers.** Groq, OpenRouter and OpenAI are built in: pick one in the
+menu under the question box and add its key under **API keys**. Each also takes
+a server key (`ASKDB_GROQ_API_KEY`, `ASKDB_OPENROUTER_API_KEY`,
+`ASKDB_OPENAI_API_KEY`). For another OpenAI-compatible service, such as
+LM Studio, point the free provider at it:
 
-| Service | `ASKDB_FREE_BASE_URL` | `ASKDB_FREE_MODEL` |
-| --- | --- | --- |
-| Google Gemini (default) | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-flash-latest` |
-| [Groq](https://console.groq.com/keys) | `https://api.groq.com/openai/v1` | `openai/gpt-oss-120b` |
-| [OpenRouter](https://openrouter.ai/keys) | `https://openrouter.ai/api/v1` | any model ending in `:free` |
-| LM Studio (local) | `http://localhost:1234/v1` | the model you loaded |
+```
+ASKDB_FREE_BASE_URL=http://localhost:1234/v1
+ASKDB_FREE_MODEL=the-model-you-loaded
+```
 
-Free model names change over time. To see which models your key can use:
+To see which models a provider offers your server key:
 
 ```bash
-uv run askdb --list-models
+uv run askdb --list-models                     # the free provider
+uv run askdb --list-models --provider groq
 ```
+
+**Choosing a model.** Next to the provider menu is a model menu:
+
+- **With your own key** (added in the app), it lists every chat model that key
+  can use, fetched live from the provider. For Claude: Opus 5.5 (default),
+  Sonnet 5.5, Haiku 4.5 and Fable 5.1.
+- **With the server's key**, it lists only the models allowed in `backend/.env`,
+  so visitors can't run up the bill on an expensive model. The defaults allow
+  each provider's default model, plus Claude Sonnet and Haiku, which cost less
+  than Opus. To allow more:
+
+  ```
+  ASKDB_CLAUDE_MODELS=["claude-opus-5-5","claude-sonnet-5-5","claude-haiku-4-5","claude-fable-5-1"]
+  ASKDB_GROQ_MODELS=["openai/gpt-oss-120b","llama-3.3-70b-versatile"]
+  ```
+- **For the open model**, it lists the models installed in Ollama (`ollama list`).
+
+The app remembers your provider and model in this browser.
 
 ### Frontend
 
@@ -155,6 +175,9 @@ To stop either part, press `Ctrl+C` in its terminal.
 - **Edit the SQL.** In the SQL tab, click **Edit**, change the query, and press
   **Run** (or `⌘↵`). It is still validated as read-only. **Revert** brings back
   the model's version.
+- **Pick a model.** Under the question box, choose the provider (Free/Gemini,
+  Claude, Groq, OpenRouter, OpenAI, or the local open model) and then the exact
+  model. Your own key unlocks every model the provider offers you.
 - **Use the keyboard.** `⌘K` (`Ctrl+K` on Windows/Linux) opens the command
   palette, and `/` jumps to the question box.
 - **Share.** **Share** copies a link like `http://localhost:3000/?q=...` that
@@ -312,7 +335,21 @@ uv run python eval/compare.py --readme
 The free tier allows only a few requests a minute. `--delay` waits that many
 seconds between questions, and a question that hits the rate limit waits a
 minute and is asked again (up to 3 times), so rate limits don't count as wrong
-answers. Claude runs use API credits. Local runs are free but slower. Commit the files
+answers. Claude runs use API credits. Local runs are free but slower.
+
+The model menu in the app reads these result files. After a full run, that model
+shows its score, such as "89% on eval", and the most accurate measured model of
+each provider is marked with ★. Runs with fewer than 20 questions (`--limit`) are
+ignored, and if a model was run several times, the newest file counts. To label
+the menu on a server, commit the files in `eval/results/`, or point
+`ASKDB_EVAL_RESULTS_DIR` at a folder that has them.
+
+To compare models within one provider, run each with `--model`:
+
+```bash
+uv run python eval/run_eval.py --provider claude --model claude-haiku-4-5 --out eval/results/claude-haiku-4-5.json
+uv run python eval/run_eval.py --provider claude --model claude-opus-5-5 --out eval/results/claude-opus-5-5.json
+``` Commit the files
 in `eval/results/` so you can track accuracy over time.
 
 To add questions, append lines to `eval/dataset.jsonl`:
@@ -350,12 +387,17 @@ model keys in the app instead of the two key variables.
 | Variable | Default | What it does |
 | --- | --- | --- |
 | `ANTHROPIC_API_KEY` | none | Server key for Claude (users can add their own in the app instead) |
-| `ASKDB_PROVIDER` | `free` | Default model: `free`, `claude`, `local`, or `auto` (Claude when `ANTHROPIC_API_KEY` is set, otherwise free) |
+| `ASKDB_PROVIDER` | `free` | Default provider: `free`, `claude`, `groq`, `openrouter`, `openai`, `local`, or `auto` (Claude when `ANTHROPIC_API_KEY` is set, otherwise free) |
 | `ASKDB_FREE_API_KEY` | none | Server key for the free model (users can add their own in the app instead) |
 | `ASKDB_FREE_BASE_URL` | Gemini's OpenAI-compatible URL | Any OpenAI-compatible chat API |
 | `ASKDB_FREE_MODEL` | `gemini-flash-latest` | Model name at that API (`uv run askdb --list-models`) |
-| `ASKDB_FREE_TIMEOUT_S` | `120` | Seconds to wait for the free model |
-| `ASKDB_MODEL` | `claude-opus-5-5` | Claude model ID |
+| `ASKDB_FREE_MODELS` | `[]` | Extra models visitors may pick on the server's free key (the default is always allowed) |
+| `ASKDB_FREE_TIMEOUT_S` | `120` | Seconds to wait for a hosted model (free, Groq, OpenRouter, OpenAI) |
+| `ASKDB_GROQ_API_KEY` / `_MODEL` / `_MODELS` / `_BASE_URL` | none / `openai/gpt-oss-120b` / `[]` / Groq's API | Groq: server key, default model, models allowed on the server key, endpoint |
+| `ASKDB_OPENROUTER_API_KEY` / `_MODEL` / `_MODELS` / `_BASE_URL` | none / `openrouter/auto` / `[]` / OpenRouter's API | OpenRouter, same four settings |
+| `ASKDB_OPENAI_API_KEY` / `_MODEL` / `_MODELS` / `_BASE_URL` | none / `gpt-5-mini` / `[]` / OpenAI's API | OpenAI, same four settings |
+| `ASKDB_MODEL` | `claude-opus-5-5` | Default Claude model |
+| `ASKDB_CLAUDE_MODELS` | Opus 5.5, Sonnet 5.5, Haiku 4.5 | Claude models visitors may pick on the server's key (Fable 5.1 is also available with the user's own key) |
 | `ASKDB_EFFORT` | `medium` | Claude effort: `low`, `medium`, `high`, `xhigh`, `max` |
 | `ASKDB_LOCAL_MODEL` | `hf.co/mradermacher/Arctic-Text2SQL-R1-7B-GGUF:Q4_K_M` | Open model name, as Ollama knows it |
 | `ASKDB_LOCAL_BASE_URL` | `http://localhost:11434` | Where Ollama (or another server) runs |
@@ -371,6 +413,7 @@ model keys in the app instead of the two key variables.
 | `ASKDB_MAX_UPLOAD_MB` | `50` | Maximum size of one upload |
 | `ASKDB_MAX_UPLOADS` | `20` | Maximum number of uploads per browser |
 | `ASKDB_MAX_TOTAL_UPLOADS` | `200` | Maximum number of uploads on the server |
+| `ASKDB_EVAL_RESULTS_DIR` | `eval/results` | Eval result files that label the model menu ([section 9](#9-measure-accuracy-evaluation)) |
 
 Frontend setting, in `frontend/.env.local`:
 
@@ -440,7 +483,8 @@ databases than on PostgreSQL.
 | --- | --- |
 | `No API key for the free model` | No key in the browser and none on the server. Click the key button in the top bar and paste a free key from aistudio.google.com/apikey. |
 | `The free model API rejected the key` | The key is wrong or was deleted. Create a new one and paste it in the API keys dialog. |
-| `Model "…" not found` | That model name isn't available to your key. Run `uv run askdb --list-models` and set `ASKDB_FREE_MODEL` to one of them. |
+| `Model "…" not found` | That model isn't available to your key. Pick another in the model menu, or run `uv run askdb --list-models --provider <name>` and set `ASKDB_<NAME>_MODEL` to one of them. |
+| `… needs your own API key` | The server only lets visitors use the models in `ASKDB_*_MODELS`. Add your own key under **API keys**, or ask the operator to allow the model. |
 | `Free-tier rate limit reached` | Free tiers allow only a few requests per minute. Wait a minute and try again. |
 | `No Anthropic key` | You picked Claude but haven't added an Anthropic key. Add one in the API keys dialog, or switch back to **Free**. |
 | `The Anthropic API rejected the key` | The key is wrong or revoked. Create a new one. |

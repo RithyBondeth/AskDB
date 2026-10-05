@@ -3,6 +3,7 @@
     uv run python eval/run_eval.py                       # full dataset, default provider
     uv run python eval/run_eval.py --limit 5             # quick smoke run
     uv run python eval/run_eval.py --provider local      # open model via Ollama
+    uv run python eval/run_eval.py --provider claude --model claude-haiku-4-5
     uv run python eval/run_eval.py --out eval/results/claude-v1.json
     uv run python eval/run_eval.py --delay 5             # pace requests (free-tier limits)
 
@@ -24,6 +25,7 @@ from askdb.db import QueryError, run_query
 from askdb.execute import AnswerError
 from askdb.generate import GenerationError
 from askdb.pipeline import AskDB
+from askdb.providers import PROVIDERS, resolve_model
 
 DATASET = Path(__file__).with_name("dataset.jsonl")
 # Gold queries can return more rows than the app shows; compare in full.
@@ -93,10 +95,11 @@ def main() -> int:
     parser.add_argument("--out", type=Path, default=None, help="write per-question results JSON")
     parser.add_argument(
         "--provider",
-        choices=["claude", "free", "local"],
+        choices=PROVIDERS,
         default=None,
         help="override ASKDB_PROVIDER",
     )
+    parser.add_argument("--model", default=None, help="a model the provider offers")
     parser.add_argument(
         "--delay",
         type=float,
@@ -109,7 +112,9 @@ def main() -> int:
     rows = rows[: args.limit] if args.limit else rows
     db = AskDB.from_settings()
     provider = args.provider or db.default_provider
-    print(f"Provider: {provider} ({db.model_name(provider)})\n")
+    # Runs on the server's keys, so the ASKDB_*_MODELS allowlists apply.
+    model = resolve_model(db.settings, provider, args.model, None)
+    print(f"Provider: {provider} ({model})\n")
 
     results, hits, self_corrected = [], 0, 0
     for i, row in enumerate(rows):
@@ -121,7 +126,7 @@ def main() -> int:
         try:
             for retry in range(RATE_LIMIT_RETRIES + 1):
                 try:
-                    ans = db.ask(row["question"], provider=provider)
+                    ans = db.ask(row["question"], provider=provider, model=model)
                     break
                 except GenerationError as e:
                     if not is_rate_limited(e) or retry == RATE_LIMIT_RETRIES:
@@ -150,7 +155,7 @@ def main() -> int:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         summary = {
             "provider": provider,
-            "model": db.model_name(provider),
+            "model": model,
             "effort": db.settings.effort if provider == "claude" else None,
             "accuracy": accuracy,
             "hits": hits,

@@ -120,7 +120,7 @@ def test_upload_csvs_then_query(client, registry):
 def test_ask_uses_the_chosen_database(client, registry, scripted):
     info = upload(client, ("sales.csv", SALES_CSV)).json()
     db = registry.get(info["id"], ME)
-    db.generator_for = lambda q, provider=None, context=None, api_key=None: scripted(
+    db.generator_for = lambda q, provider=None, context=None, api_key=None, model=None: scripted(
         "SELECT COUNT(*) FROM sales"
     )
     res = client.post("/api/ask", json={"question": "how many", "database": info["id"]})

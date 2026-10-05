@@ -19,6 +19,7 @@ import Doodle from "@/components/Doodle";
 import LivePipeline from "@/components/LivePipeline";
 import ResultPanel from "@/components/ResultPanel";
 import { FOLLOW_UPS } from "@/lib/examples";
+import { providerInfo } from "@/lib/providers";
 import type { Turn } from "@/lib/types";
 
 export default function TurnView({
@@ -46,7 +47,7 @@ export default function TurnView({
 }) {
   const { status, data, error } = turn;
   const elapsed = useElapsed(turn);
-  const model = data?.model ?? models?.[turn.provider] ?? turn.provider;
+  const model = data?.model ?? turn.model ?? models?.[turn.provider] ?? turn.provider;
   const corrected = data && data.provider !== "manual" && data.attempts.length > 1;
 
   return (
@@ -110,9 +111,7 @@ export default function TurnView({
                 <p className="mt-1 max-w-xs text-sm text-muted">
                   {turn.provider === "local"
                     ? "The open model reasons step by step. On a laptop this can take a minute."
-                    : turn.provider === "free"
-                      ? "Asking the free model, then checking the SQL is read-only and running it."
-                      : "Writing SQL, checking it’s read-only, and running it."}
+                    : `Asking ${providerInfo(turn.provider).label}, then checking the SQL is read-only and running it.`}
                 </p>
               </div>
             </div>

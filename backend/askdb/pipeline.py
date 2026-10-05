@@ -5,7 +5,6 @@ from __future__ import annotations
 import datetime as dt
 import os
 from dataclasses import dataclass, field
-from typing import Literal
 
 import anthropic
 from sqlalchemy import Engine
@@ -23,6 +22,7 @@ from askdb.generate import (
 from askdb.hosted import HostedGenerator
 from askdb.local import LocalGenerator
 from askdb.prompts import FEW_SHOT_EXAMPLES
+from askdb.providers import HOSTED, PROVIDERS, Provider, default_model, hosted_config
 from askdb.schema import Schema, introspect, link_tables
 
 MISSING_ANTHROPIC_KEY = (
@@ -30,7 +30,7 @@ MISSING_ANTHROPIC_KEY = (
     "set ANTHROPIC_API_KEY on the server, or switch to the Free model."
 )
 
-Provider = Literal["claude", "free", "local"]
+__all__ = ["AskDB", "Provider", "PROVIDERS"]
 
 
 @dataclass
@@ -97,11 +97,8 @@ class AskDB:
     @property
     def configured(self) -> dict[str, bool]:
         """Which providers have what they need (the local server isn't checked)."""
-        return {
-            "claude": self.has_anthropic_credentials,
-            "free": self.settings.free_api_key is not None,
-            "local": True,
-        }
+        out = {p: hosted_config(self.settings, p).api_key is not None for p in HOSTED}
+        return out | {"claude": self.has_anthropic_credentials, "local": True}
 
     @property
     def default_provider(self) -> Provider:
@@ -111,12 +108,8 @@ class AskDB:
         return "claude" if self.has_anthropic_credentials else "free"
 
     def model_name(self, provider: Provider | None = None) -> str:
-        provider = provider or self.default_provider
-        return {
-            "claude": self.settings.model,
-            "free": self.settings.free_model,
-            "local": self.settings.local_model,
-        }[provider]
+        """The default model for a provider."""
+        return default_model(self.settings, provider or self.default_provider)
 
     def generator_for(
         self,
@@ -124,10 +117,14 @@ class AskDB:
         provider: Provider | None = None,
         context: list[Turn] | None = None,
         api_key: str | None = None,
+        model: str | None = None,
     ) -> SQLGenerator:
         """The generator for a provider. `api_key` is the user's own key for that
-        provider (from the browser); it takes precedence over the server's key."""
+        provider (from the browser); it takes precedence over the server's key.
+        `model` must already be checked (askdb.providers.resolve_model); None uses
+        the provider's default."""
         provider = provider or self.default_provider
+        model = model or self.model_name(provider)
         # Link on the whole conversation so follow-ups keep the tables they build on.
         linking_text = " ".join([*(t.question for t in context or []), question])
         tables = link_tables(self.schema, linking_text)
@@ -135,7 +132,7 @@ class AskDB:
             return LocalGenerator(
                 dialect=self.schema.dialect,
                 schema_ddl=self.schema.ddl(tables),
-                model=self.settings.local_model,
+                model=model,
                 base_url=self.settings.local_base_url,
                 api=self.settings.local_api,
                 reference_date=self.reference_date,
@@ -149,21 +146,23 @@ class AskDB:
             reference_date=self.reference_date,
             examples=self.examples,
         )
-        if provider == "free":
-            key = self.settings.free_api_key
+        if provider != "claude":
+            cfg = hosted_config(self.settings, provider)
             return HostedGenerator(
                 system,
-                model=self.settings.free_model,
-                base_url=self.settings.free_base_url,
-                api_key=api_key or (key.get_secret_value() if key else None),
+                model=model,
+                base_url=cfg.base_url,
+                api_key=api_key or cfg.api_key,
                 context=context,
                 timeout_s=self.settings.free_timeout_s,
+                provider=provider,
+                label=cfg.label,
             )
         if not api_key and not self.has_anthropic_credentials:
             raise GenerationError(MISSING_ANTHROPIC_KEY)
         return ClaudeGenerator(
             system,
-            model=self.settings.model,
+            model=model,
             effort=self.settings.effort,
             # The user's own key gets a client for this request only.
             client=None if api_key else self.client,
@@ -179,9 +178,10 @@ class AskDB:
         context: list[Turn] | None = None,
         on_event: EventHandler | None = None,
         api_key: str | None = None,
+        model: str | None = None,
     ) -> Answer:
         own = generator is None
-        gen = generator or self.generator_for(question, provider, context, api_key)
+        gen = generator or self.generator_for(question, provider, context, api_key, model)
         try:
             return answer(
                 question,

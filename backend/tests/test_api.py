@@ -9,15 +9,18 @@ from askdb.config import Settings
 from askdb.sources import SourceRegistry
 
 
-def make_client(db_path, generator, seen_providers=None, seen_keys=None):
+def make_client(db_path, generator, seen_providers=None, seen_keys=None, seen_models=None):
     registry = SourceRegistry(
         Settings(database_url=f"sqlite:///{db_path}", upload_dir=db_path.parent / "uploads")
     )
     db = registry.sample()
 
-    def fake_generator_for(question, provider=None, context=None, api_key=None):  # no network
+    def fake_generator_for(question, provider=None, context=None, api_key=None, model=None):
+        # no network
         if seen_providers is not None:
             seen_providers.append(provider)
+        if seen_models is not None:
+            seen_models.append(model)
         if seen_keys is not None:
             seen_keys.append(api_key)
         generator.context = context
@@ -63,8 +66,9 @@ def test_unknown_provider_is_rejected(db_path, scripted):
 
 def test_health_lists_providers(db_path, scripted):
     body = make_client(db_path, scripted()).get("/api/health").json()
-    assert set(body["providers"]) == {"claude", "free", "local"}
-    assert set(body["configured"]) == {"claude", "free", "local"}
+    every = {"claude", "free", "groq", "openrouter", "openai", "local"}
+    assert set(body["providers"]) == every
+    assert set(body["configured"]) == every
 
 
 def test_ask_reports_failed_attempts(db_path, scripted):
@@ -166,7 +170,9 @@ def test_key_check(db_path, scripted, monkeypatch):
     assert check("")["ok"] is False
 
     seen = []
-    monkeypatch.setattr(api.main, "list_models", lambda url, key, c: seen.append(key) or ["m"])
+    monkeypatch.setattr(
+        api.main, "fetch_hosted_models", lambda url, key, c: seen.append(key) or ["m"]
+    )
     assert check("good") == {"ok": True, "message": "Key works."}
     assert seen == ["good"]
 
@@ -174,7 +180,7 @@ def test_key_check(db_path, scripted, monkeypatch):
         req = httpx.Request("GET", url)
         raise httpx.HTTPStatusError("bad", request=req, response=httpx.Response(400, request=req))
 
-    monkeypatch.setattr(api.main, "list_models", rejected)
+    monkeypatch.setattr(api.main, "fetch_hosted_models", rejected)
     assert check("bad") == {"ok": False, "message": "That key was rejected."}
 
 
@@ -241,3 +247,51 @@ def test_stream_stops_asking_the_model_after_disconnect(db_path):
     finally:
         server.should_exit = True
         thread.join(5)
+
+
+def test_ask_uses_the_chosen_model(db_path, scripted):
+    seen = []
+    client = make_client(db_path, scripted("SELECT 1 AS one", "SELECT 1 AS one"), seen_models=seen)
+    body = {"question": "one", "provider": "claude", "model": "claude-haiku-4-5"}
+    res = client.post("/api/ask", json=body)
+    assert res.status_code == 200
+    assert res.json()["model"] == "claude-haiku-4-5"
+    stream = client.post("/api/ask/stream", json=body)
+    assert parse_sse(stream.text)[-1]["data"]["model"] == "claude-haiku-4-5"
+    assert seen == ["claude-haiku-4-5", "claude-haiku-4-5"]
+
+
+def test_ask_without_model_uses_the_default(db_path, scripted):
+    seen = []
+    client = make_client(db_path, scripted("SELECT 1"), seen_models=seen)
+    res = client.post("/api/ask", json={"question": "one", "provider": "groq"})
+    assert res.json()["model"] == "openai/gpt-oss-120b" and seen == ["openai/gpt-oss-120b"]
+
+
+def test_expensive_model_needs_the_users_own_key(db_path, scripted):
+    client = make_client(db_path, scripted("SELECT 1"))
+    body = {"question": "one", "provider": "claude", "model": "claude-fable-5-1"}
+    for path in ("/api/ask", "/api/ask/stream"):
+        res = client.post(path, json=body)
+        assert res.status_code == 400, path
+        assert "own API key" in res.json()["detail"]["message"]
+    res = client.post("/api/ask", json=body, headers={"X-AskDB-Api-Key": "sk-ant-user"})
+    assert res.status_code == 200
+
+
+def test_models_endpoint(db_path, scripted):
+    client = make_client(db_path, scripted())
+    body = client.get("/api/models", params={"provider": "claude"}).json()
+    assert body["provider"] == "claude" and body["default"] == "claude-opus-5-5"
+    assert {"id", "label", "note"} <= set(body["models"][0])
+    assert client.get("/api/models", params={"provider": "gpt"}).status_code == 422
+
+
+def test_key_check_uses_each_providers_url(db_path, scripted, monkeypatch):
+    client = make_client(db_path, scripted())
+    seen = []
+    monkeypatch.setattr(api.main, "fetch_hosted_models", lambda url, key, c: seen.append(url))
+    res = client.post(
+        "/api/keys/check", json={"provider": "groq"}, headers={"X-AskDB-Api-Key": "gsk"}
+    ).json()
+    assert res["ok"] and seen == ["https://api.groq.com/openai/v1"]

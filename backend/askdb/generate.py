@@ -152,10 +152,20 @@ class ClaudeGenerator:
                 }
             ],
             messages=build_messages(question, repairs, self.context),
-            thinking={"type": "adaptive"},
-            output_config={"effort": self.effort},
+            **self._model_options(),
+        )
+
+    def _model_options(self) -> dict:
+        """Request options that differ by model."""
+        if self.model.startswith("claude-haiku-4"):
+            # Haiku 4.5 takes neither adaptive thinking nor effort; SQL generation
+            # works well without thinking at this tier.
+            return {}
+        return {
+            "thinking": {"type": "adaptive"},
+            "output_config": {"effort": self.effort},
             # If a safety classifier declines, let the API retry on its
             # recommended fallback model instead of failing the request.
-            betas=["server-side-fallback-2026-07-01"],
-            fallbacks="default",
-        )
+            "betas": ["server-side-fallback-2026-07-01"],
+            "fallbacks": "default",
+        }

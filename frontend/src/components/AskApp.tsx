@@ -15,14 +15,17 @@ import Sidebar, { SidebarDrawer } from "@/components/Sidebar";
 import TurnView from "@/components/TurnView";
 import UploadDialog from "@/components/UploadDialog";
 import { type ApiKeys, keyFor, loadKeys, saveKeys } from "@/lib/keys";
+import { loadChoice, type ModelChoice, saveChoice } from "@/lib/modelChoice";
 import { ownerHeaders } from "@/lib/owner";
-import { askStream, deleteDatabase, runSql } from "@/lib/stream";
+import { effectiveModel, PROVIDERS } from "@/lib/providers";
+import { askStream, deleteDatabase, fetchModels, runSql } from "@/lib/stream";
 import { getTheme, nextTheme, setTheme } from "@/lib/theme";
 import type {
   AskError,
   DatabaseInfo,
   DatabasesResponse,
   HealthResponse,
+  ModelsResponse,
   Provider,
   SchemaResponse,
   StreamEvent,
@@ -73,6 +76,11 @@ export default function AskApp() {
   const [question, setQuestion] = useState("");
   const [turns, setTurns] = useState<Turn[]>([]);
   const [provider, setProvider] = useState<Provider>("free");
+  // Remembered picks (localStorage) and the model lists fetched so far, keyed by
+  // provider and key, since a user's own key can unlock more models.
+  const [choice, setChoice] = useState<ModelChoice>({ models: {} });
+  const [modelLists, setModelLists] = useState<Record<string, ModelsResponse>>({});
+  const [modelsLoading, setModelsLoading] = useState(false);
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [offline, setOffline] = useState(false);
   const [history, setHistory] = useState<string[]>([]);
@@ -106,9 +114,51 @@ export default function AskApp() {
   const configured = useMemo(() => {
     if (!health?.configured) return null;
     const c = { ...health.configured };
-    for (const p of ["free", "claude"] as const) c[p] = c[p] || Boolean(keys[p]);
+    for (const p of PROVIDERS) c[p.id] = c[p.id] || Boolean(keyFor(keys, p.id));
     return c;
   }, [health, keys]);
+
+  const userKey = keyFor(keys, provider);
+  const listKey = `${provider}\u0000${userKey ?? ""}`;
+  const modelList = modelLists[listKey];
+  const model = effectiveModel(choice.models[provider], modelList, health?.providers[provider]);
+  const modelRef = useRef(model);
+  useEffect(() => {
+    modelRef.current = model;
+  }, [model]);
+
+  // Load the model menu for the current provider (and key) once health is known.
+  useEffect(() => {
+    if (!health || modelList || configured?.[provider] === false) return;
+    let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setModelsLoading(true);
+    fetchModels(provider, userKey)
+      .then((list) => !cancelled && setModelLists((m) => ({ ...m, [listKey]: list })))
+      .catch(() => {})
+      .finally(() => !cancelled && setModelsLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [health, provider, userKey, listKey, modelList, configured]);
+
+  const chooseProvider = useCallback((p: Provider) => {
+    setProvider(p);
+    providerRef.current = p;
+    setChoice((c) => {
+      const next = { ...c, provider: p };
+      saveChoice(next);
+      return next;
+    });
+  }, []);
+
+  const chooseModel = useCallback((m: string) => {
+    setChoice((c) => {
+      const next = { ...c, models: { ...c.models, [providerRef.current]: m } };
+      saveChoice(next);
+      return next;
+    });
+  }, []);
 
   const busy = turns.some((t) => t.status === "running");
   const lastDone = [...turns].reverse().find((t) => t.status === "done");
@@ -142,6 +192,7 @@ export default function AskApp() {
         id,
         question: trimmed,
         provider: providerRef.current,
+        model: modelRef.current,
         database: databaseRef.current,
         status: "running",
         progress: { stage: "generate", attempt: 1, failures: [] },
@@ -176,6 +227,7 @@ export default function AskApp() {
         const data = await askStream({
           question: trimmed,
           provider: turn.provider,
+          model: turn.model,
           database: turn.database,
           context,
           apiKey: keyFor(keysRef.current, turn.provider),
@@ -273,6 +325,8 @@ export default function AskApp() {
       const saved = loadKeys();
       setKeys(saved);
       keysRef.current = saved;
+      const remembered = loadChoice();
+      setChoice(remembered);
       const list = await refreshDatabases();
       if (list.some((d) => d.id === initialDb)) selectDatabase(initialDb);
       try {
@@ -280,8 +334,9 @@ export default function AskApp() {
         if (!res.ok) throw new Error();
         const h = (await res.json()) as HealthResponse;
         setHealth(h);
-        setProvider(h.default_provider);
-        providerRef.current = h.default_provider;
+        const start = remembered.provider ?? h.default_provider;
+        setProvider(start);
+        providerRef.current = start;
       } catch {
         setOffline(true);
       }
@@ -334,13 +389,23 @@ export default function AskApp() {
         currentDatabase: database,
         ask,
         newChat,
-        setProvider,
+        setProvider: chooseProvider,
         cycleTheme: () => setTheme(nextTheme(getTheme())),
         selectDatabase,
         upload: uploads.allowed ? () => setUploadOpen(true) : null,
         openKeys: () => setKeysOpen(true),
       }),
-    [history, schema, databases, database, ask, newChat, selectDatabase, uploads.allowed],
+    [
+      history,
+      schema,
+      databases,
+      database,
+      ask,
+      newChat,
+      chooseProvider,
+      selectDatabase,
+      uploads.allowed,
+    ],
   );
 
   const sidebar = (
@@ -381,9 +446,13 @@ export default function AskApp() {
       onSubmit={() => ask(question)}
       onStop={() => abortRef.current?.abort()}
       provider={provider}
-      onProviderChange={setProvider}
-      models={health?.providers ?? null}
+      onProviderChange={chooseProvider}
+      model={model}
+      onModelChange={chooseModel}
+      modelList={modelList}
+      modelsLoading={modelsLoading}
       configured={configured}
+      onAddKey={() => setKeysOpen(true)}
       busy={busy}
       followUpTo={lastDone?.question ?? null}
       example={schema?.suggestions[0]}

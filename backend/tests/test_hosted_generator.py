@@ -8,8 +8,9 @@ import pytest
 from askdb.config import Settings
 from askdb.execute import answer
 from askdb.generate import GenerationError, Repair, Turn
-from askdb.hosted import HostedGenerator, list_models
+from askdb.hosted import HostedGenerator
 from askdb.pipeline import AskDB
+from askdb.providers import fetch_hosted_models
 
 
 def mock_client(handler):
@@ -113,7 +114,8 @@ def test_list_models_strips_gemini_prefix():
         assert req.url.path.endswith("/models")
         return httpx.Response(200, json={"data": [{"id": "models/gemini-b"}, {"id": "gemini-a"}]})
 
-    assert list_models("https://x.test/v1", "k", mock_client(handler)) == ["gemini-a", "gemini-b"]
+    got = fetch_hosted_models("https://x.test/v1", "k", mock_client(handler))
+    assert got == ["gemini-a", "gemini-b"]
 
 
 def settings(db_path, **kw):

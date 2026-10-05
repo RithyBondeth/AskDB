@@ -31,10 +31,19 @@ from pydantic import BaseModel, Field
 from askdb.config import get_settings
 from askdb.execute import Answer, AnswerError, Attempt
 from askdb.generate import CannotAnswerError, GenerationError, Turn
-from askdb.hosted import list_models
 from askdb.importers import UploadError
-from askdb.pipeline import AskDB, Provider
+from askdb.pipeline import AskDB
 from askdb.present import pick_chart, to_json_value
+from askdb.providers import (
+    HOSTED,
+    PROVIDERS,
+    ModelNotAllowed,
+    Provider,
+    fetch_hosted_models,
+    hosted_config,
+    list_models,
+    resolve_model,
+)
 from askdb.sources import SourceRegistry, valid_owner
 
 log = logging.getLogger("askdb.api")
@@ -91,6 +100,8 @@ class AskRequest(BaseModel):
     question: str = Field(min_length=1, max_length=1000)
     # None uses the server default (ASKDB_PROVIDER).
     provider: Provider | None = None
+    # A model the provider offers (see /api/models). None uses the provider's default.
+    model: str | None = Field(default=None, max_length=200)
     # Earlier turns of the conversation, oldest first, for follow-up questions.
     context: list[TurnIn] = Field(default_factory=list, max_length=5)
     # Which database to ask (None = the configured sample).
@@ -186,6 +197,14 @@ def _context(req: AskRequest) -> list[Turn]:
     return [Turn(question=t.question, sql=t.sql) for t in req.context]
 
 
+def _model(db: AskDB, provider: Provider, model: str | None, api_key: str | None) -> str:
+    """The model for this request; 400 if the user may not use the one they picked."""
+    try:
+        return resolve_model(db.settings, provider, model, api_key)
+    except ModelNotAllowed as e:
+        raise HTTPException(400, ErrorDetail(message=str(e)).model_dump()) from None
+
+
 # ---------------------------------------------------------------- routes
 
 
@@ -208,7 +227,7 @@ def health(registry: Registry, owner: Owner = None, database: str | None = Query
         "dialect": db.schema.dialect,
         "tables": len(db.schema.tables),
         "default_provider": db.default_provider,
-        "providers": {p: db.model_name(p) for p in ("claude", "free", "local")},
+        "providers": {p: db.model_name(p) for p in PROVIDERS},
         "configured": db.configured,
     }
 
@@ -286,14 +305,19 @@ def ask(
     # and DB calls don't stall the event loop.
     db = resolve(registry, req.database, owner)
     provider = req.provider or db.default_provider
+    model = _model(db, provider, req.model, _key(api_key))
     try:
         ans = db.ask(
-            req.question.strip(), provider=provider, context=_context(req), api_key=_key(api_key)
+            req.question.strip(),
+            provider=provider,
+            context=_context(req),
+            api_key=_key(api_key),
+            model=model,
         )
     except Exception as e:
         status, detail = error_detail(e)
         raise HTTPException(status, detail.model_dump()) from e
-    return to_response(ans, provider, db.model_name(provider))
+    return to_response(ans, provider, model)
 
 
 # While the model thinks, send an SSE comment this often so proxies and browsers
@@ -321,6 +345,7 @@ def ask_stream(
     """
     db = resolve(registry, req.database, owner)
     provider = req.provider or db.default_provider
+    model = _model(db, provider, req.model, _key(api_key))
     events: queue.Queue[dict | None] = queue.Queue()
     gone = threading.Event()
 
@@ -338,8 +363,9 @@ def ask_stream(
                 context=_context(req),
                 on_event=on_event,
                 api_key=_key(api_key),
+                model=model,
             )
-            result = to_response(ans, provider, db.model_name(provider))
+            result = to_response(ans, provider, model)
             events.put({"type": "result", "data": result.model_dump()})
         except ClientGone:
             log.info("Client disconnected; stopped answering %r", req.question[:80])
@@ -388,8 +414,21 @@ def run(req: RunRequest, registry: Registry, owner: Owner = None) -> AskResponse
     return to_response(ans, "manual", "Edited by you")
 
 
+@app.get("/api/models")
+def models(
+    registry: Registry,
+    provider: Annotated[Provider, Query()],
+    api_key: UserKey = None,
+) -> dict:
+    """The models to offer for a provider. With the user's own key, hosted providers
+    list everything that key can use; with the server's key, only what the operator
+    allowed (ASKDB_*_MODELS)."""
+    result = list_models(registry.settings, provider, _key(api_key))
+    return {"provider": provider} | result.__dict__
+
+
 class KeyCheckRequest(BaseModel):
-    provider: Literal["claude", "free"]
+    provider: Literal["claude", "free", "groq", "openrouter", "openai"]
 
 
 @app.post("/api/keys/check")
@@ -400,9 +439,9 @@ def check_key(req: KeyCheckRequest, api_key: UserKey = None) -> dict:
         return {"ok": False, "message": "Paste a key first."}
     settings = get_settings()
     try:
-        if req.provider == "free":
+        if req.provider in HOSTED:
             with httpx.Client(timeout=15) as client:
-                list_models(settings.free_base_url, key, client)
+                fetch_hosted_models(hosted_config(settings, req.provider).base_url, key, client)
         else:
             with anthropic.Anthropic(api_key=key, max_retries=0, timeout=15) as client:
                 client.models.list(limit=1)
