@@ -1,33 +1,62 @@
 "use client";
 
-import { ChartColumn, ChartLine, Code2, Download, Search, Table2 } from "lucide-react";
+import {
+  ChartColumn,
+  ChartLine,
+  ChartPie,
+  ChartScatter,
+  Code2,
+  Download,
+  Loader2,
+  Search,
+  Table2,
+} from "lucide-react";
 import { useState } from "react";
 
 import ResultChart from "@/components/ResultChart";
 import ResultTable from "@/components/ResultTable";
 import SqlEditor from "@/components/SqlEditor";
+import { chartChoices } from "@/lib/charts";
 import { downloadText, formatHero, toCsv } from "@/lib/format";
-import type { AskResponse } from "@/lib/types";
+import type { AskResponse, ChartType } from "@/lib/types";
 
 type Tab = "chart" | "table" | "sql";
+
+const CHART_ICONS = { bar: ChartColumn, line: ChartLine, pie: ChartPie, scatter: ChartScatter };
 
 export default function ResultPanel({
   data,
   edited,
   onRunSql,
   onRevert,
+  onMoreRows,
+  onExportAll,
 }: {
   data: AskResponse;
   edited: boolean;
   onRunSql: (sql: string) => Promise<string | null>;
   onRevert: () => void;
+  /** Fetch the next page of rows into this answer; resolves with an error message or null. */
+  onMoreRows?: () => Promise<string | null>;
+  /** Download every row as CSV, not just the ones loaded. */
+  onExportAll?: () => Promise<string | null>;
 }) {
   const hasChart = data.chart.type !== "none";
   const single = data.rows.length === 1 && data.columns.length === 1;
   const [tab, setTab] = useState<Tab>(hasChart ? "chart" : "table");
-  const [chartType, setChartType] = useState<"bar" | "line" | undefined>(undefined);
+  const [chartType, setChartType] = useState<ChartType | undefined>(undefined);
   const [filter, setFilter] = useState("");
+  const [loading, setLoading] = useState<"rows" | "export" | null>(null);
+  const [rowsError, setRowsError] = useState<string | null>(null);
   const activeTab: Tab = tab === "chart" && !hasChart ? "table" : tab;
+  const choices = chartChoices(data.chart);
+
+  async function busyWith(what: "rows" | "export", fn?: () => Promise<string | null>) {
+    if (!fn || loading) return;
+    setLoading(what);
+    setRowsError(await fn());
+    setLoading(null);
+  }
 
   return (
     <div className="sketch overflow-hidden">
@@ -49,14 +78,14 @@ export default function ResultPanel({
         </TabButton>
 
         <div className="ml-auto flex items-center gap-1">
-          {activeTab === "chart" && hasChart && (
+          {activeTab === "chart" && choices.length > 1 && (
             <div
               className="sketch-sm inline-flex bg-surface p-0.5"
               role="group"
               aria-label="Chart type"
             >
-              {(["bar", "line"] as const).map((t) => {
-                const Icon = t === "bar" ? ChartColumn : ChartLine;
+              {choices.map((t) => {
+                const Icon = CHART_ICONS[t];
                 const on = (chartType ?? data.chart.type) === t;
                 return (
                   <button
@@ -88,10 +117,25 @@ export default function ResultPanel({
           {activeTab !== "sql" && (
             <button
               type="button"
-              onClick={() => downloadText("askdb-result.csv", toCsv(data.columns, data.rows))}
-              className="inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs text-muted transition hover:bg-surface-2 hover:text-foreground"
+              title={
+                data.truncated && onExportAll
+                  ? "Download every row as CSV, not just the ones shown"
+                  : "Download these rows as CSV"
+              }
+              disabled={loading === "export"}
+              onClick={() =>
+                data.truncated && onExportAll
+                  ? busyWith("export", onExportAll)
+                  : downloadText("askdb-result.csv", toCsv(data.columns, data.rows))
+              }
+              className="inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs text-muted transition hover:bg-surface-2 hover:text-foreground disabled:opacity-60"
             >
-              <Download className="size-3.5" /> CSV
+              {loading === "export" ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Download className="size-3.5" />
+              )}
+              {data.truncated && onExportAll ? "All rows CSV" : "CSV"}
             </button>
           )}
         </div>
@@ -127,9 +171,21 @@ export default function ResultPanel({
           </div>
         )}
         {data.truncated && activeTab !== "sql" && (
-          <p className="border-t border-border px-4 py-2 text-xs text-muted">
-            Showing the first {data.rows.length} rows.
-          </p>
+          <div className="flex flex-wrap items-center gap-3 border-t border-border px-4 py-2 text-xs text-muted">
+            <span>Showing the first {data.rows.length} rows.</span>
+            {onMoreRows && (
+              <button
+                type="button"
+                onClick={() => busyWith("rows", onMoreRows)}
+                disabled={loading === "rows"}
+                className="btn-paper inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium disabled:opacity-60"
+              >
+                {loading === "rows" && <Loader2 className="size-3.5 animate-spin" />}
+                Load more
+              </button>
+            )}
+            {rowsError && <span className="text-danger">{rowsError}</span>}
+          </div>
         )}
       </div>
     </div>

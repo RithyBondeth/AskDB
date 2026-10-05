@@ -9,6 +9,8 @@ import {
   RotateCcw,
   Rows3,
   Sparkles,
+  ThumbsDown,
+  ThumbsUp,
   TriangleAlert,
   User,
 } from "lucide-react";
@@ -33,6 +35,9 @@ export default function TurnView({
   onEdit,
   onFollowUp,
   onShare,
+  onRate,
+  onMoreRows,
+  onExportAll,
 }: {
   turn: Turn;
   isLast: boolean;
@@ -43,7 +48,11 @@ export default function TurnView({
   onRetry: () => void;
   onEdit: () => void;
   onFollowUp: (q: string) => void;
-  onShare: () => Promise<void>;
+  /** Copy a link to this answer; resolves with what was copied (for the button label). */
+  onShare: () => Promise<"answer" | "question" | null>;
+  onRate: (rating: 1 | -1) => Promise<void>;
+  onMoreRows: () => Promise<string | null>;
+  onExportAll: () => Promise<string | null>;
 }) {
   const { status, data, error } = turn;
   const elapsed = useElapsed(turn);
@@ -84,6 +93,9 @@ export default function TurnView({
               </Meta>
             )}
             <span className="ml-auto flex items-center gap-0.5">
+              {status === "done" && data && (
+                <RateButtons rating={turn.rating} edited={!!turn.original} onRate={onRate} />
+              )}
               {status !== "running" && (
                 <IconButton label="Ask again" onClick={onRetry} disabled={busy}>
                   <RotateCcw className="size-3.5" />
@@ -119,6 +131,20 @@ export default function TurnView({
 
           {status === "done" && data && (
             <div className="mt-4 flex flex-col gap-3">
+              {data.summary ? (
+                <p className="animate-fade-up text-[16px] leading-relaxed font-medium">
+                  {data.summary}
+                </p>
+              ) : (
+                turn.summarizing && (
+                  <p className="text-sm text-subtle" aria-live="polite">
+                    Writing a summary
+                    <span className="typing-dot">.</span>
+                    <span className="typing-dot [animation-delay:0.15s]">.</span>
+                    <span className="typing-dot [animation-delay:0.3s]">.</span>
+                  </p>
+                )
+              )}
               {data.explanation && (
                 <p className="text-sm leading-relaxed text-muted">{data.explanation}</p>
               )}
@@ -128,7 +154,16 @@ export default function TurnView({
                 edited={!!turn.original}
                 onRunSql={onRunSql}
                 onRevert={onRevert}
+                onMoreRows={onMoreRows}
+                onExportAll={onExportAll}
               />
+              {turn.rating === -1 && !turn.original && (
+                <p className="sketch-sm bg-note-yellow/60 px-3 py-2 text-sm">
+                  Thanks for flagging it. If you can fix it, edit the query in the{" "}
+                  <strong>SQL</strong> tab and run it, then press 👍 to save the corrected query.
+                  Corrections are used as examples for your next questions.
+                </p>
+              )}
               {corrected && (
                 <details className="group sketch-sm bg-note-mint/60 px-4 py-3">
                   <summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-medium select-none">
@@ -235,11 +270,13 @@ function IconButton({
   label,
   onClick,
   disabled,
+  pressed,
   children,
 }: {
   label: string;
   onClick: () => void;
   disabled?: boolean;
+  pressed?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -247,6 +284,7 @@ function IconButton({
       type="button"
       title={label}
       aria-label={label}
+      aria-pressed={pressed}
       onClick={onClick}
       disabled={disabled}
       className="grid size-7 place-items-center rounded-md text-muted transition hover:bg-surface-2 hover:text-foreground disabled:opacity-40"
@@ -256,21 +294,54 @@ function IconButton({
   );
 }
 
-function ShareButton({ onShare }: { onShare: () => Promise<void> }) {
-  const [done, setDone] = useState(false);
+function ShareButton({ onShare }: { onShare: () => Promise<"answer" | "question" | null> }) {
+  const [done, setDone] = useState<"answer" | "question" | null>(null);
   return (
     <button
       type="button"
-      title="Copy a link that asks this question"
+      title="Copy a link to this answer"
       onClick={async () => {
-        await onShare();
-        setDone(true);
-        setTimeout(() => setDone(false), 1500);
+        setDone(await onShare());
+        setTimeout(() => setDone(null), 2000);
       }}
       className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-muted transition hover:bg-surface-2 hover:text-foreground"
     >
       <Link2 className="size-3.5" />
-      {done ? "Link copied" : "Share"}
+      {done === "answer" ? "Link copied" : done === "question" ? "Question link copied" : "Share"}
     </button>
+  );
+}
+
+function RateButtons({
+  rating,
+  edited,
+  onRate,
+}: {
+  rating?: 1 | -1;
+  edited: boolean;
+  onRate: (rating: 1 | -1) => Promise<void>;
+}) {
+  const [sending, setSending] = useState(false);
+  const rate = async (r: 1 | -1) => {
+    if (sending) return;
+    setSending(true);
+    await onRate(r);
+    setSending(false);
+  };
+  const upLabel = edited ? "Your edited query is right: save it" : "Correct answer";
+  return (
+    <span className="mr-1 flex items-center gap-0.5" role="group" aria-label="Rate this answer">
+      <IconButton label={upLabel} onClick={() => rate(1)} disabled={sending} pressed={rating === 1}>
+        <ThumbsUp className={`size-3.5 ${rating === 1 ? "fill-current text-success" : ""}`} />
+      </IconButton>
+      <IconButton
+        label="Wrong answer"
+        onClick={() => rate(-1)}
+        disabled={sending}
+        pressed={rating === -1}
+      >
+        <ThumbsDown className={`size-3.5 ${rating === -1 ? "fill-current text-danger" : ""}`} />
+      </IconButton>
+    </span>
   );
 }

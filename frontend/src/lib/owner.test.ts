@@ -30,3 +30,15 @@ describe("ownerId", () => {
     expect(ownerId()).toBe(id);
   });
 });
+
+describe("setOwnerId", () => {
+  it("adopts a valid sync code and rejects anything else", async () => {
+    const data = stubLocalStorage();
+    const { ownerId, setOwnerId } = await freshOwner();
+    const code = "other-device-0123456789";
+    expect(setOwnerId("not valid!")).toBe(false);
+    expect(setOwnerId(`  ${code} `)).toBe(true);
+    expect(data.get("askdb:owner")).toBe(code);
+    expect(ownerId()).toBe(code);
+  });
+});

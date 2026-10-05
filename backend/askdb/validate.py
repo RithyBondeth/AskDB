@@ -44,10 +44,18 @@ FORBIDDEN = (
 READ_ONLY_ROOTS = (exp.Select, exp.SetOperation)  # SetOperation = UNION / INTERSECT / EXCEPT
 
 
+# SQLAlchemy dialect names that sqlglot spells differently.
+SQLGLOT_DIALECTS = {"postgresql": "postgres", "mssql": "tsql"}
+
+
+def sqlglot_dialect(dialect: str) -> str:
+    return SQLGLOT_DIALECTS.get(dialect, dialect)
+
+
 def validate_sql(sql: str, dialect: str) -> str:
     """Return the query (stripped) if it is one read-only statement, else raise."""
     try:
-        statements = [s for s in sqlglot.parse(sql, read=dialect) if s is not None]
+        statements = [s for s in sqlglot.parse(sql, read=sqlglot_dialect(dialect)) if s is not None]
     except ParseError as e:
         raise InvalidSQLError(str(e).split("\n")[0]) from e
 

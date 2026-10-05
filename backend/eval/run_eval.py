@@ -6,6 +6,7 @@
     uv run python eval/run_eval.py --provider claude --model claude-haiku-4-5
     uv run python eval/run_eval.py --out eval/results/claude-v1.json
     uv run python eval/run_eval.py --delay 5             # pace requests (free-tier limits)
+    uv run python eval/run_eval.py --dataset eval/feedback.jsonl  # cases from 👍/👎 feedback
 
 With Claude, each question costs an API call (plus repairs). With the local open
 model it is free but slower, depending on your hardware.
@@ -36,8 +37,8 @@ RATE_LIMIT_WAIT_S = 60
 RATE_LIMIT_RETRIES = 3
 
 
-def load_dataset() -> list[dict]:
-    return [json.loads(line) for line in DATASET.read_text().splitlines() if line.strip()]
+def load_dataset(path: Path = DATASET) -> list[dict]:
+    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
 
 def is_rate_limited(e: Exception) -> bool:
@@ -92,6 +93,12 @@ def results_match(pred: list[list], gold: list[list], ordered: bool) -> bool:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument(
+        "--dataset",
+        type=Path,
+        default=DATASET,
+        help="questions and gold SQL, one JSON object per line (default: the Chinook set)",
+    )
     parser.add_argument("--out", type=Path, default=None, help="write per-question results JSON")
     parser.add_argument(
         "--provider",
@@ -108,7 +115,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    rows = load_dataset()
+    rows = load_dataset(args.dataset)
     rows = rows[: args.limit] if args.limit else rows
     db = AskDB.from_settings()
     provider = args.provider or db.default_provider

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
 import json
 import logging
 import queue
 import threading
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from functools import lru_cache
 from typing import Annotated, Literal
 
@@ -29,11 +31,11 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from askdb.config import get_settings
-from askdb.execute import Answer, AnswerError, Attempt
+from askdb.execute import Answer, AnswerError, Attempt, export_rows, fetch_rows
 from askdb.generate import CannotAnswerError, GenerationError, Turn
 from askdb.importers import UploadError
 from askdb.pipeline import AskDB
-from askdb.present import pick_chart, to_json_value
+from askdb.present import describe_result, pick_chart, to_json_value
 from askdb.providers import (
     HOSTED,
     PROVIDERS,
@@ -44,7 +46,9 @@ from askdb.providers import (
     list_models,
     resolve_model,
 )
-from askdb.sources import SourceRegistry, valid_owner
+from askdb.sources import SAMPLE_ID, SourceRegistry, valid_owner
+from askdb.store import Store
+from askdb.validate import InvalidSQLError, UnsafeQueryError, validate_sql
 
 log = logging.getLogger("askdb.api")
 
@@ -63,6 +67,15 @@ def get_registry() -> SourceRegistry:
 
 
 Registry = Annotated[SourceRegistry, Depends(get_registry)]
+
+
+@lru_cache
+def get_store() -> Store:
+    s = get_settings()
+    return Store(s.store_path, s.max_saved_answers)
+
+
+AppStore = Annotated[Store, Depends(get_store)]
 
 # The user's own key for the chosen provider, kept in their browser and sent with
 # each request. It's used for that request only: never stored or logged.
@@ -113,6 +126,40 @@ class RunRequest(BaseModel):
     database: str | None = None
 
 
+class RowsRequest(BaseModel):
+    sql: str = Field(min_length=1, max_length=5000)
+    database: str | None = None
+    offset: int = Field(ge=0)
+    limit: int = Field(default=500, ge=1)
+
+
+class ExportRequest(BaseModel):
+    sql: str = Field(min_length=1, max_length=5000)
+    database: str | None = None
+
+
+class ConnectRequest(BaseModel):
+    url: str = Field(min_length=1, max_length=2000)
+    name: str | None = Field(default=None, max_length=80)
+
+
+class ShareRequest(BaseModel):
+    shared: bool = True
+
+
+class FeedbackRequest(BaseModel):
+    answer_id: str | None = Field(default=None, max_length=32)
+    database: str | None = None
+    question: str = Field(min_length=1, max_length=1000)
+    sql: str = Field(min_length=1, max_length=5000)
+    rating: Literal[1, -1]
+    # The SQL the user edited the answer into, when they fixed it.
+    corrected_sql: str | None = Field(default=None, max_length=5000)
+    comment: str | None = Field(default=None, max_length=1000)
+    provider: str | None = Field(default=None, max_length=40)
+    model: str | None = Field(default=None, max_length=200)
+
+
 class AttemptOut(BaseModel):
     sql: str
     error: str | None
@@ -124,6 +171,8 @@ class ChartOut(BaseModel):
     x: str | None
     y: list[str] | None
     reason: str
+    group: str | None = None
+    label: str | None = None
 
 
 class AskResponse(BaseModel):
@@ -137,6 +186,11 @@ class AskResponse(BaseModel):
     truncated: bool
     chart: ChartOut
     attempts: list[AttemptOut]
+    # A plain-language answer, when summaries are on. While streaming it arrives
+    # in a separate `summary` event after the result.
+    summary: str | None = None
+    # The saved answer's id (for share links and feedback), when history is on.
+    id: str | None = None
 
 
 class ErrorDetail(BaseModel):
@@ -153,7 +207,7 @@ def _attempts(attempts: list[Attempt]) -> list[AttemptOut]:
 
 def to_response(ans: Answer, provider: str, model: str) -> AskResponse:
     rows = [[to_json_value(v) for v in r] for r in ans.result.rows]
-    chart = pick_chart(ans.result.columns, rows)
+    chart = pick_chart(ans.result.columns, rows, ans.question)
     return AskResponse(
         question=ans.question,
         provider=provider,
@@ -195,6 +249,38 @@ def error_detail(e: Exception) -> tuple[int, ErrorDetail]:
 
 def _context(req: AskRequest) -> list[Turn]:
     return [Turn(question=t.question, sql=t.sql) for t in req.context]
+
+
+def _database_id(database: str | None) -> str:
+    return database or SAMPLE_ID
+
+
+def _feedback_examples(store: Store, database: str | None, owner: str | None):
+    """This browser's verified question/SQL pairs for this database."""
+    if not valid_owner(owner) or get_settings().feedback_examples <= 0:
+        return None
+    return [(e.question, e.sql) for e in store.examples(_database_id(database), owner)]
+
+
+def _save(store: Store, owner: str | None, database: str | None, res: AskResponse) -> None:
+    """Save an answer to this browser's history (sets res.id)."""
+    if not valid_owner(owner) or not get_settings().save_history:
+        return
+    try:
+        res.id = store.save_answer(owner, _database_id(database), res.model_dump())
+    except Exception:  # history is a convenience; never fail the answer over it
+        log.exception("Could not save the answer")
+
+
+def _require_owner(owner: str | None) -> str:
+    if not valid_owner(owner):
+        raise HTTPException(
+            400,
+            ErrorDetail(
+                message="Your browser didn't send an id. Reload the page and try again."
+            ).model_dump(),
+        )
+    return owner
 
 
 def _model(db: AskDB, provider: Provider, model: str | None, api_key: str | None) -> str:
@@ -244,7 +330,9 @@ def list_databases(registry: Registry, owner: Owner = None) -> dict:
     return {
         "databases": [info.to_dict() for info in registry.list(owner)],
         "allow_uploads": s.allow_uploads,
+        "allow_connections": s.allow_connections,
         "max_upload_mb": s.max_upload_mb,
+        "save_history": s.save_history,
     }
 
 
@@ -286,20 +374,39 @@ async def upload_database(
     return info.to_dict()
 
 
+@app.post("/api/databases/connect")
+def connect_database(req: ConnectRequest, registry: Registry, owner: Owner = None) -> dict:
+    """Add a live PostgreSQL or MySQL database by connection string. Only this
+    browser can see it; the connection string is never sent back."""
+    owner = _require_owner(owner)
+    try:
+        info = registry.connect(req.url, req.name, owner)
+    except UploadError as e:
+        raise HTTPException(400, ErrorDetail(message=str(e)).model_dump()) from e
+    return info.to_dict()
+
+
 @app.delete("/api/databases/{database}")
-def delete_database(database: str, registry: Registry, owner: Owner = None) -> dict:
+def delete_database(
+    database: str, registry: Registry, store: AppStore, owner: Owner = None
+) -> dict:
     try:
         registry.delete(database, owner)
     except KeyError:
         raise HTTPException(404, ErrorDetail(message="No such database.").model_dump()) from None
     except UploadError as e:
         raise HTTPException(400, ErrorDetail(message=str(e)).model_dump()) from e
+    store.delete_database(database)
     return {"deleted": database}
 
 
 @app.post("/api/ask", response_model=AskResponse, responses={422: {"model": ErrorDetail}})
 def ask(
-    req: AskRequest, registry: Registry, api_key: UserKey = None, owner: Owner = None
+    req: AskRequest,
+    registry: Registry,
+    store: AppStore,
+    api_key: UserKey = None,
+    owner: Owner = None,
 ) -> AskResponse:
     # Sync endpoint: FastAPI runs it in a worker thread, so the blocking SDK
     # and DB calls don't stall the event loop.
@@ -313,11 +420,15 @@ def ask(
             context=_context(req),
             api_key=_key(api_key),
             model=model,
+            extra_examples=_feedback_examples(store, req.database, owner),
         )
     except Exception as e:
         status, detail = error_detail(e)
         raise HTTPException(status, detail.model_dump()) from e
-    return to_response(ans, provider, model)
+    res = to_response(ans, provider, model)
+    res.summary = db.summarize(ans, provider, _key(api_key), model)
+    _save(store, owner, req.database, res)
+    return res
 
 
 # While the model thinks, send an SSE comment this often so proxies and browsers
@@ -334,11 +445,13 @@ def ask_stream(
     req: AskRequest,
     request: Request,
     registry: Registry,
+    store: AppStore,
     api_key: UserKey = None,
     owner: Owner = None,
 ) -> StreamingResponse:
     """Same as /api/ask, as Server-Sent Events: progress events while the pipeline
-    runs, then one `result` or `error` event.
+    runs, then one `result` or `error` event. After a result comes a `summary`
+    event (the plain-language answer), so the table shows without waiting for it.
 
     If the client disconnects, the pipeline stops at its next step, so a closed tab
     doesn't keep spending model calls on repairs nobody will see.
@@ -364,9 +477,19 @@ def ask_stream(
                 on_event=on_event,
                 api_key=_key(api_key),
                 model=model,
+                extra_examples=_feedback_examples(store, req.database, owner),
             )
             result = to_response(ans, provider, model)
+            _save(store, owner, req.database, result)
             events.put({"type": "result", "data": result.model_dump()})
+            if gone.is_set():
+                return
+            events.put({"type": "stage", "stage": "summarize"})
+            summary = db.summarize(ans, provider, _key(api_key), model)
+            if summary:
+                if result.id:
+                    store.update_answer(owner, result.id, {"summary": summary})
+                events.put({"type": "summary", "text": summary})
         except ClientGone:
             log.info("Client disconnected; stopped answering %r", req.question[:80])
         except Exception as e:  # reported to the client as an event
@@ -411,7 +534,143 @@ def run(req: RunRequest, registry: Registry, owner: Owner = None) -> AskResponse
     except Exception as e:
         status, detail = error_detail(e)
         raise HTTPException(status, detail.model_dump()) from e
-    return to_response(ans, "manual", "Edited by you")
+    res = to_response(ans, "manual", "Edited by you")
+    if db.settings.summaries != "off":
+        res.summary = describe_result(ans.result.columns, ans.result.rows, ans.result.truncated)
+    return res
+
+
+@app.post("/api/rows")
+def more_rows(req: RowsRequest, registry: Registry, owner: Owner = None) -> dict:
+    """The next page of an answer's rows: the same SQL, re-validated, from `offset`."""
+    db = resolve(registry, req.database, owner)
+    limit = min(req.limit, db.settings.max_page_rows)
+    try:
+        result = fetch_rows(req.sql, db.engine, db.schema.dialect, limit, req.offset)
+    except Exception as e:
+        status, detail = error_detail(e)
+        raise HTTPException(status, detail.model_dump()) from e
+    return {
+        "columns": result.columns,
+        "rows": [[to_json_value(v) for v in r] for r in result.rows],
+        "truncated": result.truncated,
+    }
+
+
+@app.post("/api/export")
+def export_csv(req: ExportRequest, registry: Registry, owner: Owner = None) -> StreamingResponse:
+    """Every row of an answer as CSV (up to ASKDB_EXPORT_ROW_LIMIT), streamed."""
+    db = resolve(registry, req.database, owner)
+    try:
+        columns, rows = export_rows(
+            req.sql, db.engine, db.schema.dialect, db.settings.export_row_limit
+        )
+    except Exception as e:
+        status, detail = error_detail(e)
+        raise HTTPException(status, detail.model_dump()) from e
+
+    def lines() -> Iterator[str]:
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(columns)
+        for i, row in enumerate(rows, 1):
+            writer.writerow(["" if v is None else to_json_value(v) for v in row])
+            if i % 500 == 0:
+                yield buf.getvalue()
+                buf.seek(0)
+                buf.truncate()
+        yield buf.getvalue()
+
+    return StreamingResponse(
+        lines(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="askdb-result.csv"'},
+    )
+
+
+# ---------------------------------------------------------------- history
+
+
+@app.get("/api/history")
+def history(
+    store: AppStore,
+    owner: Owner = None,
+    database: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+) -> dict:
+    """This browser's saved answers, newest first (for one database, or all)."""
+    if not valid_owner(owner):
+        return {"answers": []}
+    return {"answers": [a.__dict__ for a in store.list_answers(owner, database, limit)]}
+
+
+@app.get("/api/history/{answer_id}")
+def saved_answer(answer_id: str, store: AppStore, owner: Owner = None) -> dict:
+    """A saved answer: this browser's own, or anyone's that has been shared."""
+    found = store.get_answer(owner, answer_id)
+    if found is None:
+        raise HTTPException(
+            404, ErrorDetail(message="That answer doesn't exist or isn't shared.").model_dump()
+        )
+    return found
+
+
+@app.post("/api/history/{answer_id}/share")
+def share_answer(answer_id: str, req: ShareRequest, store: AppStore, owner: Owner = None) -> dict:
+    """Let anyone with the link see this saved answer (its question, SQL, and the
+    rows it returned), or stop sharing it."""
+    if not store.share_answer(_require_owner(owner), answer_id, req.shared):
+        raise HTTPException(404, ErrorDetail(message="No such answer.").model_dump())
+    return {"id": answer_id, "shared": req.shared}
+
+
+@app.delete("/api/history/{answer_id}")
+def delete_answer(answer_id: str, store: AppStore, owner: Owner = None) -> dict:
+    deleted = store.delete_answers(_require_owner(owner), answer_id=answer_id)
+    if not deleted:
+        raise HTTPException(404, ErrorDetail(message="No such answer.").model_dump())
+    return {"deleted": deleted}
+
+
+@app.delete("/api/history")
+def clear_history(store: AppStore, owner: Owner = None, database: str | None = Query(None)) -> dict:
+    """Delete this browser's saved answers for a database (or all of them)."""
+    return {"deleted": store.delete_answers(_require_owner(owner), database=database)}
+
+
+# ---------------------------------------------------------------- feedback
+
+
+@app.post("/api/feedback")
+def feedback(
+    req: FeedbackRequest, registry: Registry, store: AppStore, owner: Owner = None
+) -> dict:
+    """Record 👍/👎 on an answer, with the corrected SQL if the user fixed it.
+    Verified pairs are reused as examples in this browser's prompts for this
+    database, and can be exported as eval cases (eval/export_feedback.py)."""
+    owner = _require_owner(owner)
+    db = resolve(registry, req.database, owner)
+    corrected = (req.corrected_sql or "").strip() or None
+    if corrected:
+        try:
+            corrected = validate_sql(corrected, db.schema.dialect)
+        except (UnsafeQueryError, InvalidSQLError) as e:
+            raise HTTPException(
+                400, ErrorDetail(message=f"The corrected SQL isn't valid: {e}").model_dump()
+            ) from e
+    feedback_id = store.add_feedback(
+        owner,
+        _database_id(req.database),
+        req.question.strip(),
+        req.sql.strip(),
+        req.rating,
+        corrected_sql=corrected,
+        comment=(req.comment or "").strip() or None,
+        answer_id=req.answer_id,
+        provider=req.provider,
+        model=req.model,
+    )
+    return {"id": feedback_id}
 
 
 @app.get("/api/models")

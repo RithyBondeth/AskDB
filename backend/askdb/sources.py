@@ -8,17 +8,23 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import ipaddress
 import json
+import os
 import re
 import shutil
+import socket
 import threading
 import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import anthropic
+from sqlalchemy.engine import URL, make_url
+from sqlalchemy.exc import ArgumentError
 
 from askdb.config import Settings, get_settings
+from askdb.db import make_engine
 from askdb.importers import (
     CSV_SUFFIXES,
     SQLITE_SUFFIXES,
@@ -27,7 +33,7 @@ from askdb.importers import (
     csvs_to_sqlite,
 )
 from askdb.pipeline import AskDB
-from askdb.schema import Schema
+from askdb.schema import Schema, introspect
 
 SAMPLE_ID = "sample"
 _ID = re.compile(r"^[0-9a-f]{32}$")
@@ -46,6 +52,62 @@ def _owner_hash(owner: str | None) -> str:
     return hashlib.sha256(owner.encode()).hexdigest() if valid_owner(owner) else ""
 
 
+# Live databases people can connect, by SQLAlchemy backend name.
+CONNECTION_KINDS = {"postgresql": "postgres", "postgres": "postgres", "mysql": "mysql",
+                    "mariadb": "mysql"}  # fmt: skip
+DEFAULT_PORTS = {"postgres": 5432, "mysql": 3306}
+CONNECTION_HELP = (
+    "Paste a PostgreSQL or MySQL connection string, like "
+    "postgresql://user:password@host:5432/dbname or mysql://user:password@host:3306/dbname."
+)
+
+
+def parse_connection(url: str) -> tuple[URL, str]:
+    """The parsed URL and its kind ("postgres" or "mysql"), or UploadError."""
+    try:
+        parsed = make_url(url.strip())
+    except (ArgumentError, ValueError):
+        raise UploadError(f"That isn't a valid connection string. {CONNECTION_HELP}") from None
+    kind = CONNECTION_KINDS.get(parsed.get_backend_name())
+    if kind is None:
+        raise UploadError(f"Only PostgreSQL and MySQL can be connected. {CONNECTION_HELP}")
+    if not parsed.host:
+        raise UploadError(f"The connection string needs a host. {CONNECTION_HELP}")
+    if not parsed.database:
+        raise UploadError(f"The connection string needs a database name. {CONNECTION_HELP}")
+    return parsed, kind
+
+
+def display_url(parsed: URL) -> str:
+    """user@host:port/database, without the password."""
+    user = f"{parsed.username}@" if parsed.username else ""
+    port = f":{parsed.port}" if parsed.port else ""
+    return f"{user}{parsed.host}{port}/{parsed.database}"
+
+
+def check_public_host(host: str, port: int) -> None:
+    """Refuse hosts that resolve to loopback, private, or other internal addresses,
+    so a public server can't be used to reach its own network."""
+    try:
+        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+    except socket.gaierror:
+        raise UploadError(f"Couldn't find the host {host!r}.") from None
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if not ip.is_global or ip.is_multicast:
+            raise UploadError(
+                "This server only connects to databases on the public internet, "
+                f"and {host} is a private or local address."
+            )
+
+
+def _scrub(message: str, parsed: URL) -> str:
+    """A driver error without the password in it, on one line."""
+    if parsed.password:
+        message = message.replace(str(parsed.password), "***")
+    return " ".join(message.split())[:300]
+
+
 # Curated questions for the bundled Chinook sample.
 SAMPLE_SUGGESTIONS = [
     "Which artist has the most albums?",
@@ -61,18 +123,23 @@ SAMPLE_SUGGESTIONS = [
 class SourceInfo:
     id: str
     name: str
-    kind: str  # "sample" | "sqlite" | "csv"
+    kind: str  # "sample" | "sqlite" | "csv" | "postgres" | "mysql"
     tables: int
     size_bytes: int
     created_at: str
     # Hash of the uploading browser's id; "" for uploads visible to everyone
     # (sample, uploads made before scoping existed, or made from the CLI/tests).
     owner: str = ""
+    # Live connections only: the connection string (secret, never returned by the
+    # API) and a display form without the password, e.g. "app@db.example.com/shop".
+    url: str = ""
+    detail: str = ""
 
     def to_dict(self) -> dict:
-        """What the API returns: everything but the owner hash."""
+        """What the API returns: everything but the owner hash and the URL."""
         d = asdict(self)
         d.pop("owner")
+        d.pop("url")
         return d
 
     def visible_to(self, owner: str | None) -> bool:
@@ -155,9 +222,15 @@ class SourceRegistry:
             if source_id not in self._cache:
                 # Share one Anthropic client across databases.
                 client = self._cache[SAMPLE_ID].client if SAMPLE_ID in self._cache else None
-                self._cache[source_id] = AskDB.for_sqlite_file(
-                    str(self._db_path(info.id)), self.settings, client
-                )
+                if info.url:
+                    parsed, kind = parse_connection(info.url)
+                    if not self.settings.allow_private_hosts:
+                        check_public_host(parsed.host, parsed.port or DEFAULT_PORTS[kind])
+                    self._cache[source_id] = AskDB.for_database(info.url, self.settings, client)
+                else:
+                    self._cache[source_id] = AskDB.for_sqlite_file(
+                        str(self._db_path(info.id)), self.settings, client
+                    )
             return self._cache[source_id]
 
     def list(self, owner: str | None = None) -> list[SourceInfo]:
@@ -186,6 +259,57 @@ class SourceRegistry:
 
     # ------------------------------------------------------------ writing
 
+    def _check_room(self, mine: str) -> None:
+        uploads = self._uploads()
+        if sum(u.owner == mine for u in uploads) >= self.settings.max_uploads:
+            raise UploadError(
+                f"Database limit reached ({self.settings.max_uploads}). Delete one first."
+            )
+        if len(uploads) >= self.settings.max_total_uploads:
+            raise UploadError("This server is full. Try again later, or run AskDB yourself.")
+
+    def connect(self, url: str, name: str | None = None, owner: str | None = None) -> SourceInfo:
+        """Add a live PostgreSQL or MySQL database by connection string. The
+        connection is tested (and the schema read) before it is saved."""
+        if not self.settings.allow_connections:
+            raise UploadError("Connecting databases is turned off on this server.")
+        parsed, kind = parse_connection(url)
+        if not self.settings.allow_private_hosts:
+            check_public_host(parsed.host, parsed.port or DEFAULT_PORTS[kind])
+        mine = _owner_hash(owner)
+        self._check_room(mine)
+
+        canonical = parsed.render_as_string(hide_password=False)
+        engine = make_engine(canonical, self.settings.statement_timeout_s)
+        try:
+            schema = introspect(engine)
+        except Exception as e:  # driver errors vary: bad password, unknown host, timeout
+            orig = getattr(e, "orig", None) or e
+            raise UploadError(f"Couldn't connect: {_scrub(str(orig), parsed)}") from None
+        finally:
+            engine.dispose()
+        if not schema.tables:
+            raise UploadError("Connected, but this user can't see any tables in that database.")
+
+        self.dir.mkdir(parents=True, exist_ok=True)
+        info = SourceInfo(
+            id=uuid.uuid4().hex,
+            name=(name or parsed.database or parsed.host).strip()[:80] or "Untitled",
+            kind=kind,
+            tables=len(schema.tables),
+            size_bytes=0,
+            created_at=dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
+            owner=mine,
+            url=canonical,
+            detail=display_url(parsed),
+        )
+        # The URL holds a password: readable by the server's user only.
+        meta = self._meta_path(info.id)
+        fd = os.open(meta, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(json.dumps(asdict(info)))
+        return info
+
     def add(
         self, files: list[tuple[str, bytes]], name: str | None = None, owner: str | None = None
     ) -> SourceInfo:
@@ -198,14 +322,8 @@ class SourceRegistry:
             raise UploadError("Uploads are turned off on this server.")
         if not files:
             raise UploadError("Choose a file to upload.")
-        uploads = self._uploads()
         mine = _owner_hash(owner)
-        if sum(u.owner == mine for u in uploads) >= self.settings.max_uploads:
-            raise UploadError(
-                f"Upload limit reached ({self.settings.max_uploads}). Delete one first."
-            )
-        if len(uploads) >= self.settings.max_total_uploads:
-            raise UploadError("This server is full. Try again later, or run AskDB yourself.")
+        self._check_room(mine)
         total = sum(len(data) for _, data in files)
         if total > self.settings.max_upload_mb * 1024 * 1024:
             raise UploadError(f"Files are larger than {self.settings.max_upload_mb} MB.")

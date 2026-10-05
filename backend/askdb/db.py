@@ -9,11 +9,15 @@ from __future__ import annotations
 
 import sqlite3
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import Engine, create_engine, event
 from sqlalchemy.engine import make_url
+
+# How long to wait for a network database to accept a connection.
+CONNECT_TIMEOUT_S = 10
 
 
 class QueryError(Exception):
@@ -46,14 +50,31 @@ def make_engine(database_url: str, timeout_s: float) -> Engine:
 
         return create_engine("sqlite://", creator=connect)
 
-    if backend == "postgresql":
-        ms = int(timeout_s * 1000)
+    ms = int(timeout_s * 1000)
+    if backend in ("postgresql", "postgres"):  # "postgres://" is common in hosted URLs
         return create_engine(
-            url,
+            url.set(drivername="postgresql+psycopg"),
+            pool_pre_ping=True,
             connect_args={
-                "options": f"-c default_transaction_read_only=on -c statement_timeout={ms}"
+                "connect_timeout": CONNECT_TIMEOUT_S,
+                "options": f"-c default_transaction_read_only=on -c statement_timeout={ms}",
             },
         )
+
+    if backend in ("mysql", "mariadb"):
+        engine = create_engine(
+            url.set(drivername=f"{backend}+pymysql"),
+            pool_pre_ping=True,
+            connect_args={"connect_timeout": CONNECT_TIMEOUT_S},
+        )
+
+        @event.listens_for(engine, "connect")
+        def _session(dbapi_conn, _record):  # pragma: no cover - needs a MySQL server
+            with dbapi_conn.cursor() as cur:
+                cur.execute("SET SESSION TRANSACTION READ ONLY")
+                cur.execute(f"SET SESSION max_execution_time = {ms}")  # MySQL; MariaDB ignores
+
+        return engine
 
     engine = create_engine(url)
 
@@ -78,16 +99,50 @@ def _install_sqlite_timeout(conn: sqlite3.Connection, timeout_s: float) -> None:
     conn.set_trace_callback(reset)  # called at the start of every statement
 
 
-def run_query(engine: Engine, sql: str, row_limit: int) -> QueryResult:
+def run_query(engine: Engine, sql: str, row_limit: int, offset: int = 0) -> QueryResult:
+    """Run a query and return up to `row_limit` rows, after skipping `offset` rows.
+    Rows are skipped client-side so the SQL itself is never rewritten."""
     try:
         with engine.connect() as conn:
             result = conn.exec_driver_sql(sql)
             columns = list(result.keys())
+            skipped = 0
+            while skipped < offset:
+                chunk = result.fetchmany(min(1000, offset - skipped))
+                if not chunk:
+                    break
+                skipped += len(chunk)
             fetched = result.fetchmany(row_limit + 1)
     except Exception as e:  # driver errors vary by backend
         raise QueryError(_clean_error(e)) from e
     rows = [list(r) for r in fetched[:row_limit]]
     return QueryResult(columns=columns, rows=rows, truncated=len(fetched) > row_limit)
+
+
+def iter_query(engine: Engine, sql: str, max_rows: int) -> tuple[list[str], Iterator[list[Any]]]:
+    """Columns, then rows streamed one at a time (at most `max_rows`), for exports
+    too big to hold in memory. Errors before the first row raise QueryError."""
+    conn = engine.connect()
+    try:
+        result = conn.execution_options(stream_results=True).exec_driver_sql(sql)
+        columns = list(result.keys())
+    except Exception as e:
+        conn.close()
+        raise QueryError(_clean_error(e)) from e
+
+    def rows() -> Iterator[list[Any]]:
+        try:
+            sent = 0
+            while sent < max_rows:
+                chunk = result.fetchmany(min(1000, max_rows - sent))
+                if not chunk:
+                    return
+                sent += len(chunk)
+                yield from (list(r) for r in chunk)
+        finally:
+            conn.close()
+
+    return columns, rows()
 
 
 def _clean_error(e: Exception) -> str:

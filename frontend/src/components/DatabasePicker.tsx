@@ -1,10 +1,12 @@
 "use client";
 
 import {
+  Cable,
   Check,
   ChevronDown,
   Database,
   FileSpreadsheet,
+  Server,
   Sparkles,
   Trash2,
   Upload,
@@ -13,22 +15,40 @@ import { useEffect, useRef, useState } from "react";
 
 import type { DatabaseInfo } from "@/lib/types";
 
-const KIND_ICON = { sample: Sparkles, sqlite: Database, csv: FileSpreadsheet };
+const KIND_ICON = {
+  sample: Sparkles,
+  sqlite: Database,
+  csv: FileSpreadsheet,
+  postgres: Server,
+  mysql: Server,
+};
+
+const KIND_LABEL = {
+  sample: "Sample",
+  sqlite: "SQLite upload",
+  csv: "CSV upload",
+  postgres: "PostgreSQL",
+  mysql: "MySQL",
+};
 
 export default function DatabasePicker({
   databases,
   current,
   onSelect,
   onUpload,
+  onConnect,
   onDelete,
   allowUploads,
+  allowConnections,
 }: {
   databases: DatabaseInfo[];
   current: DatabaseInfo | undefined;
   onSelect: (id: string) => void;
   onUpload: () => void;
+  onConnect: () => void;
   onDelete: (db: DatabaseInfo) => void;
   allowUploads: boolean;
+  allowConnections: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -91,13 +111,9 @@ export default function DatabasePicker({
                     <KindIcon className="size-4 shrink-0 text-muted" />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm">{db.name}</span>
-                      <span className="block text-[11px] text-subtle">
-                        {db.kind === "sample"
-                          ? "Sample"
-                          : db.kind === "csv"
-                            ? "CSV upload"
-                            : "SQLite upload"}{" "}
-                        · {db.tables} {db.tables === 1 ? "table" : "tables"}
+                      <span className="block truncate text-[11px] text-subtle" title={db.detail}>
+                        {KIND_LABEL[db.kind]} · {db.tables} {db.tables === 1 ? "table" : "tables"}
+                        {db.detail ? ` · ${db.detail}` : ""}
                       </span>
                     </span>
                     {selected && <Check className="size-4 shrink-0 text-accent" />}
@@ -117,21 +133,32 @@ export default function DatabasePicker({
               );
             })}
           </ul>
+          {(allowUploads || allowConnections) && <div className="my-1 h-px bg-border" />}
           {allowUploads && (
-            <>
-              <div className="my-1 h-px bg-border" />
-              <button
-                type="button"
-                onClick={() => {
-                  setOpen(false);
-                  onUpload();
-                }}
-                className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-accent-ink hover:bg-accent-soft"
-              >
-                <Upload className="size-4" />
-                Upload your data…
-              </button>
-            </>
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                onUpload();
+              }}
+              className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-accent-ink hover:bg-accent-soft"
+            >
+              <Upload className="size-4" />
+              Upload your data…
+            </button>
+          )}
+          {allowConnections && (
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                onConnect();
+              }}
+              className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-accent-ink hover:bg-accent-soft"
+            >
+              <Cable className="size-4" />
+              Connect a database…
+            </button>
           )}
         </div>
       )}

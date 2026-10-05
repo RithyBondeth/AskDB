@@ -78,6 +78,41 @@ class Settings(BaseSettings):
     max_uploads: int = 20  # per browser
     max_total_uploads: int = 200  # across everyone: caps disk use on a public server
 
+    # Live databases (Postgres, MySQL) people connect from the UI with a connection
+    # string. Like uploads, each belongs to the browser that added it and counts
+    # toward max_uploads. The URL (with its password) is kept on the server in
+    # upload_dir, readable only by the server's user. Ask people to use a
+    # read-only database user; AskDB also opens every connection read-only.
+    allow_connections: bool = True
+    # Set false on a public server so visitors can't reach localhost or private
+    # network addresses (the server's own network) through a connection string.
+    allow_private_hosts: bool = True
+
+    # Embedding-based schema linking for large schemas (more than 15 tables).
+    # Off unless a model is set; uses any OpenAI-compatible /embeddings API. The
+    # base URL and key default to the free provider's (Gemini), e.g.
+    # ASKDB_EMBEDDING_MODEL=gemini-embedding-001. Keyword ranking is always used too.
+    embedding_model: str | None = None
+    embedding_base_url: str | None = None
+    embedding_api_key: SecretStr | None = None
+
+    # Results. The first row_limit rows come with the answer; "Load more" pages
+    # through the rest max_page_rows at a time; CSV export streams up to
+    # export_row_limit rows.
+    max_page_rows: int = 1000
+    export_row_limit: int = 100_000
+    # A plain-language sentence under each answer: "model" asks the model that
+    # wrote the SQL (one extra call), "simple" uses a template, "off" shows none.
+    summaries: Literal["model", "simple", "off"] = "model"
+
+    # Saved answers (history that follows the browser's id) and 👍/👎 feedback.
+    store_path: Path = BACKEND_DIR / "data" / "askdb.sqlite"
+    save_history: bool = True
+    max_saved_answers: int = 500  # per browser
+    # Questions the same browser marked correct (or corrected) for the same
+    # database are added to the prompt as examples, the most similar first.
+    feedback_examples: int = 3
+
     # Eval results (eval/run_eval.py --out) label measured models in the model menu.
     eval_results_dir: Path = BACKEND_DIR / "eval" / "results"
 
@@ -87,6 +122,7 @@ class Settings(BaseSettings):
         "groq_api_key",
         "openrouter_api_key",
         "openai_api_key",
+        "embedding_api_key",
         mode="before",
     )
     @classmethod

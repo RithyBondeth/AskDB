@@ -17,8 +17,11 @@ from askdb.generate import (
     Repair,
     Turn,
     build_messages,
+    build_summary_prompt,
+    clean_summary,
     parse_response,
 )
+from askdb.prompts import SUMMARY_SYSTEM
 
 # Some models (Qwen, gpt-oss, DeepSeek) put their reasoning in <think> tags.
 _THINK = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
@@ -93,10 +96,25 @@ class HostedGenerator:
             self.client.close()
 
     def generate(self, question: str, repairs: list[Repair] | None = None) -> Generation:
-        if not self.api_key:
-            raise GenerationError(missing_key(self.provider))
         messages = [{"role": "system", "content": self.system_prompt}]
         messages += build_messages(question, repairs, self.context)
+        return parse_response(self._chat(messages))
+
+    def summarize(
+        self, question: str, columns: list[str], rows: list[list], truncated: bool
+    ) -> str:
+        """One or two sentences answering the question from the result."""
+        prompt = build_summary_prompt(question, columns, rows, truncated)
+        messages = [
+            {"role": "system", "content": SUMMARY_SYSTEM},
+            {"role": "user", "content": prompt},
+        ]
+        return clean_summary(self._chat(messages, temperature=0.2))
+
+    def _chat(self, messages: list[dict], temperature: float = 0) -> str:
+        """The text of one chat completion, without any <think> reasoning."""
+        if not self.api_key:
+            raise GenerationError(missing_key(self.provider))
         try:
             res = self.client.post(
                 f"{self.base_url}/chat/completions",
@@ -104,7 +122,7 @@ class HostedGenerator:
                 json={
                     "model": self.model,
                     "messages": messages,
-                    "temperature": 0,
+                    "temperature": temperature,
                     "max_tokens": self.max_tokens,
                 },
             )
@@ -123,7 +141,7 @@ class HostedGenerator:
         if not text.strip():
             reason = choice.get("finish_reason") or "no text"
             raise GenerationError(f"The {self.label} returned an empty answer ({reason}).")
-        return parse_response(_THINK.sub("", text))
+        return _THINK.sub("", text)
 
     def _explain(self, res: httpx.Response) -> str:
         detail = error_detail(res)

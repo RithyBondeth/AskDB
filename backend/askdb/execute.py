@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
 from sqlalchemy import Engine
 
-from askdb.db import QueryError, QueryResult, run_query
+from askdb.db import QueryError, QueryResult, iter_query, run_query
 from askdb.generate import Repair, SQLGenerator
 from askdb.validate import InvalidSQLError, UnsafeQueryError, validate_sql
 
@@ -117,3 +117,34 @@ def run_sql(sql: str, engine: Engine, dialect: str, row_limit: int = 100) -> Ans
         raise AnswerError(attempt.error or "Query failed.", [attempt])
     final_sql, result = outcome
     return Answer("Edited SQL", final_sql, "", result, [attempt])
+
+
+def _checked(sql: str, dialect: str) -> str:
+    """The read-only gate, for SQL that goes straight to the database."""
+    try:
+        return validate_sql(sql, dialect)
+    except UnsafeQueryError as e:
+        raise AnswerError(f"Blocked: {e}", [Attempt(sql, f"Blocked: {e}", "validate")]) from e
+    except InvalidSQLError as e:
+        msg = f"Syntax error: {e}"
+        raise AnswerError(msg, [Attempt(sql, msg, "validate")]) from e
+
+
+def fetch_rows(sql: str, engine: Engine, dialect: str, row_limit: int, offset: int) -> QueryResult:
+    """More rows of an answer: the same query, re-validated, starting at `offset`."""
+    checked = _checked(sql, dialect)
+    try:
+        return run_query(engine, checked, row_limit, offset)
+    except QueryError as e:
+        raise AnswerError(str(e), [Attempt(sql, str(e), "execute")]) from e
+
+
+def export_rows(
+    sql: str, engine: Engine, dialect: str, max_rows: int
+) -> tuple[list[str], Iterator[list[Any]]]:
+    """Every row of an answer (up to `max_rows`), streamed, for a full CSV export."""
+    checked = _checked(sql, dialect)
+    try:
+        return iter_query(engine, checked, max_rows)
+    except QueryError as e:
+        raise AnswerError(str(e), [Attempt(sql, str(e), "execute")]) from e

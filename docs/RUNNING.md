@@ -169,8 +169,15 @@ To stop either part, press `Ctrl+C` in its terminal.
 - **Watch it work.** The Generate → Validate → Execute → Present steps update
   live. A failed attempt shows as "self-correcting", and you can expand it
   afterwards to see what went wrong.
+- **Read the answer.** A sentence above the result answers the question in plain
+  language, written by the same model after the result arrives.
 - **Explore the result.** Switch between Chart, Table, and SQL. Click a column
-  header to sort, filter rows, switch bar/line, or download CSV.
+  header to sort, filter rows, or switch chart type. Charts are picked from the
+  result's shape: bars, lines over time, stacked bars for (label, group, value)
+  results, pies when you ask for a share or breakdown, scatter plots for two
+  measures.
+- **Get every row.** Answers show the first 100 rows. **Load more** fetches the
+  next 500, and **All rows CSV** downloads the whole result (up to 100,000 rows).
 - **Edit the SQL.** In the SQL tab, click **Edit**, change the query, and press
   **Run** (or `⌘↵`). It is still validated as read-only. **Revert** brings back
   the model's version.
@@ -179,8 +186,16 @@ To stop either part, press `Ctrl+C` in its terminal.
   model. Your own key unlocks every model the provider offers you.
 - **Use the keyboard.** `⌘K` (`Ctrl+K` on Windows/Linux) opens the command
   palette, and `/` jumps to the question box.
-- **Share.** **Share** copies a link like `http://localhost:3000/?q=...` that
-  asks the same question when opened.
+- **Rate answers.** 👍 marks an answer correct. If it's wrong, press 👎, fix the
+  query in the SQL tab, run it, then press 👍 to save the correction. Verified
+  answers become examples in your later prompts for the same database.
+- **Come back to answers.** Every answer is saved on the server. **Recent** in
+  the sidebar reopens one without asking the model again. **Use your history on
+  another device** shows a sync code: enter it in another browser to see the same
+  history and databases there.
+- **Share.** **Share** copies a link like `http://localhost:3000/?a=...` that
+  opens the saved answer (question, SQL, rows) for anyone, without a model call.
+  Without saved history it falls back to a `?q=` link that asks the question again.
 - **Build questions from the schema.** Click a table or column in the sidebar
   (the panel button on mobile) to insert its name into your question.
 
@@ -272,6 +287,38 @@ can't see them. Two things follow:
 Uploads made with an older version of AskDB have no owner and stay visible to
 everyone.
 
+### Connect a live database
+
+Choose **Connect a database…** in the same menu and paste a connection string:
+
+```
+postgresql://readonly_user:password@db.example.com:5432/shop
+mysql://readonly_user:password@db.example.com:3306/shop
+```
+
+AskDB connects, reads the schema (including table and column comments, which it
+passes to the model), and switches to the database. Like uploads, a connection is
+private to your browser's id. Every query is validated as read-only and runs in a
+read-only session with a statement timeout, but still use a database user that
+can only read (see [A PostgreSQL role for AskDB](#a-postgresql-role-for-askdb)).
+
+The connection string, password included, is stored on the AskDB server in
+`backend/data/uploads/` (readable only by the server's user) so the database is
+there next time; it's never sent back to the browser. Deleting the database in
+the menu removes it.
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `ASKDB_ALLOW_CONNECTIONS` | `true` | Set `false` to turn connections off |
+| `ASKDB_ALLOW_PRIVATE_HOSTS` | `true` | Set `false` on a public server: connection strings may then only point at public internet addresses, not `localhost` or the server's private network |
+
+### Moving to another device
+
+Answers, uploads and connections belong to your browser's random id. In the
+sidebar, **Use your history on another device** shows that id as a sync code;
+paste it into another browser to use the same history and databases there.
+Treat the code like a password.
+
 ---
 
 ## 7. Use it from the terminal (no UI)
@@ -314,8 +361,8 @@ npm run build            # production build; catches type errors
 
 ## 9. Measure accuracy (evaluation)
 
-The eval runs every question in `backend/eval/dataset.jsonl` through the full
-pipeline. It counts a question as correct when the generated query returns the
+The eval runs every question in `backend/eval/dataset.jsonl` (or another file
+given with `--dataset`) through the full pipeline. It counts a question as correct when the generated query returns the
 same rows as the reference query.
 
 ```bash
@@ -335,6 +382,18 @@ The free tier allows only a few requests a minute. `--delay` waits that many
 seconds between questions, and a question that hits the rate limit waits a
 minute and is asked again (up to 3 times), so rate limits don't count as wrong
 answers. Claude runs use API credits. Local runs are free but slower.
+
+**Eval cases from feedback.** Answers people marked 👍, or corrected after a 👎,
+can be exported in the same format and scored like the main set:
+
+```bash
+uv run python eval/export_feedback.py --out eval/feedback.jsonl   # sample database
+uv run python eval/run_eval.py --dataset eval/feedback.jsonl
+uv run python eval/export_feedback.py --raw                       # every rating, as JSON lines
+```
+
+Read through the exported cases before relying on them: they are whatever
+people clicked.
 
 The model menu in the app reads these result files. After a full run, that model
 shows its score, such as "89% on eval", and the most accurate measured model of
@@ -412,6 +471,17 @@ model keys in the app instead of the two key variables.
 | `ASKDB_MAX_UPLOAD_MB` | `50` | Maximum size of one upload |
 | `ASKDB_MAX_UPLOADS` | `20` | Maximum number of uploads per browser |
 | `ASKDB_MAX_TOTAL_UPLOADS` | `200` | Maximum number of uploads on the server |
+| `ASKDB_ALLOW_CONNECTIONS` | `true` | Allow connecting live PostgreSQL/MySQL databases ([section 6](#connect-a-live-database)) |
+| `ASKDB_ALLOW_PRIVATE_HOSTS` | `true` | Set `false` on a public server to block connections to localhost and private networks |
+| `ASKDB_EMBEDDING_MODEL` | none | Embedding model for table selection on schemas over 15 tables, e.g. `gemini-embedding-001` (off when unset) |
+| `ASKDB_EMBEDDING_BASE_URL` / `_API_KEY` | the free provider's | Any OpenAI-compatible `/embeddings` API, e.g. `http://localhost:11434/v1` for Ollama |
+| `ASKDB_SUMMARIES` | `model` | Sentence above each answer: `model` (one extra model call), `simple` (template), or `off` |
+| `ASKDB_MAX_PAGE_ROWS` | `1000` | Most rows one **Load more** can fetch |
+| `ASKDB_EXPORT_ROW_LIMIT` | `100000` | Most rows a CSV export contains |
+| `ASKDB_SAVE_HISTORY` | `true` | Save answers on the server (history, share links) |
+| `ASKDB_STORE_PATH` | `data/askdb.sqlite` | Where saved answers and feedback are kept |
+| `ASKDB_MAX_SAVED_ANSWERS` | `500` | Saved answers kept per browser (oldest go first) |
+| `ASKDB_FEEDBACK_EXAMPLES` | `3` | Verified answers added to a prompt as examples (`0` turns it off) |
 | `ASKDB_EVAL_RESULTS_DIR` | `eval/results` | Eval result files that label the model menu ([section 9](#9-measure-accuracy-evaluation)) |
 
 Frontend setting, in `frontend/.env.local`:
@@ -428,8 +498,9 @@ Point `ASKDB_DATABASE_URL` at it and restart the backend:
 # SQLite file
 ASKDB_DATABASE_URL=sqlite:////absolute/path/to/my.db
 
-# PostgreSQL (first run: uv add "psycopg[binary]")
-ASKDB_DATABASE_URL=postgresql+psycopg://readonly_user:password@localhost:5432/mydb
+# PostgreSQL or MySQL (drivers are included)
+ASKDB_DATABASE_URL=postgresql://readonly_user:password@localhost:5432/mydb
+ASKDB_DATABASE_URL=mysql://readonly_user:password@localhost:3306/mydb
 ```
 
 Also:
@@ -464,7 +535,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO askdb_reader
 ALTER ROLE askdb_reader SET default_transaction_read_only = on;
 ```
 
-Then use `postgresql+psycopg://askdb_reader:change-me@host:5432/mydb`. As this
+Then use `postgresql://askdb_reader:change-me@host:5432/mydb`. As this
 role the file, directory, password-hash and large-object functions above fail
 with "permission denied", and only the granted tables can be read. To hide
 sensitive tables or columns from the model, grant `SELECT` on just the ones you
