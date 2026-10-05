@@ -120,7 +120,16 @@ export interface Turn {
 export interface ModelsResponse {
   provider: Provider;
   default: string;
-  models: { id: string; label: string; note?: string }[];
+  models: {
+    id: string;
+    label: string;
+    note?: string;
+    /** From the server's eval results, e.g. "89% on eval". */
+    score?: string;
+    accuracy?: number;
+    /** The most accurate measured model of this provider. */
+    recommended?: boolean;
+  }[];
   /** live: from the provider for your key; allowed: the server's list; catalog: AskDB's list. */
   source: "live" | "allowed" | "catalog";
   error: string | null;

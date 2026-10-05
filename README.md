@@ -284,7 +284,10 @@ allows a few requests per minute, so a full run takes a while): `--delay` spaces
 the questions out, and a rate-limited question waits a minute and is asked again
 rather than counted as wrong. Claude runs make
 real paid API calls. Local runs are free but slower. Commit the
-results files to track accuracy across prompt and model changes. The dataset has 35 items.
+results files to track accuracy across prompt and model changes. The model menu
+reads them too: each measured model shows its score (for example "89% on eval"),
+and the most accurate one of each provider gets a ★. Only full runs of 20 or
+more questions count, not `--limit` smoke runs. The dataset has 35 items.
 
 ## Project layout
 

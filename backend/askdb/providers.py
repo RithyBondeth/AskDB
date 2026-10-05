@@ -26,6 +26,7 @@ from typing import Literal, get_args
 import httpx
 
 from askdb.config import Settings
+from askdb.scores import annotate, load_scores
 
 Provider = Literal["claude", "free", "groq", "openrouter", "openai", "local"]
 PROVIDERS: tuple[Provider, ...] = get_args(Provider)
@@ -218,7 +219,14 @@ def _entries(default: str, ids: list[str]) -> list[dict]:
 
 
 def list_models(settings: Settings, provider: Provider, user_key: str | None) -> ModelList:
-    """The models to offer in the picker for this provider and request."""
+    """The models to offer in the picker for this provider and request, with eval
+    scores on the models that have been measured (see askdb.scores)."""
+    result = _list_models(settings, provider, user_key)
+    annotate(provider, result.models, load_scores(settings.eval_results_dir))
+    return result
+
+
+def _list_models(settings: Settings, provider: Provider, user_key: str | None) -> ModelList:
     if provider == "claude":
         allowed = CLAUDE_MODEL_IDS if user_key else set(server_claude_models(settings))
         return ModelList(

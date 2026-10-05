@@ -111,3 +111,11 @@ export function effectiveModel(
 export function shortModel(id: string): string {
   return id.split("/").at(-1) ?? id;
 }
+
+/** Menu text for a model: "★ Claude Opus 5.5 · best balance · 89% on eval".
+ *  The star marks the provider's most accurate model in the server's eval results. */
+export function modelOptionLabel(m: ModelsResponse["models"][number]): string {
+  const name = m.label === m.id ? shortModel(m.id) : m.label;
+  const extras = [m.note, m.score].filter(Boolean).join(" · ");
+  return `${m.recommended ? "★ " : ""}${name}${extras ? ` · ${extras}` : ""}`;
+}

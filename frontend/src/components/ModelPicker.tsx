@@ -2,7 +2,7 @@
 
 import { ChevronDown, KeyRound, Loader2 } from "lucide-react";
 
-import { PROVIDERS, providerInfo, shortModel } from "@/lib/providers";
+import { modelOptionLabel, PROVIDERS, providerInfo } from "@/lib/providers";
 import type { ModelsResponse, Provider } from "@/lib/types";
 
 /** Two compact menus under the question box: which provider, then which of its models. */
@@ -71,8 +71,7 @@ export default function ModelPicker({
           >
             {shown.map((m) => (
               <option key={m.id} value={m.id}>
-                {m.label === m.id ? shortModel(m.id) : m.label}
-                {m.note ? ` · ${m.note}` : ""}
+                {modelOptionLabel(m)}
               </option>
             ))}
           </select>

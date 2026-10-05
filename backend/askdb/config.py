@@ -78,6 +78,9 @@ class Settings(BaseSettings):
     max_uploads: int = 20  # per browser
     max_total_uploads: int = 200  # across everyone: caps disk use on a public server
 
+    # Eval results (eval/run_eval.py --out) label measured models in the model menu.
+    eval_results_dir: Path = BACKEND_DIR / "eval" / "results"
+
     @field_validator(
         "anthropic_api_key",
         "free_api_key",

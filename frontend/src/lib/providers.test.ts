@@ -1,7 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { loadKeys } from "@/lib/keys";
 import { loadChoice, saveChoice } from "@/lib/modelChoice";
-import { effectiveModel, isProvider, PROVIDERS, shortModel } from "@/lib/providers";
+import {
+  effectiveModel,
+  isProvider,
+  modelOptionLabel,
+  PROVIDERS,
+  shortModel,
+} from "@/lib/providers";
 import { stubLocalStorage } from "@/lib/test-utils";
 import type { ModelsResponse } from "@/lib/types";
 
@@ -74,5 +80,21 @@ describe("stored choices", () => {
       JSON.stringify({ groq: "gsk_1", openrouter: "sk-or-1", openai: "sk-1", local: "no" }),
     );
     expect(loadKeys()).toEqual({ groq: "gsk_1", openrouter: "sk-or-1", openai: "sk-1" });
+  });
+});
+
+describe("modelOptionLabel", () => {
+  it("adds the note, the eval score, and a star for the recommended model", () => {
+    expect(
+      modelOptionLabel({
+        id: "claude-opus-5-5",
+        label: "Claude Opus 5.5",
+        note: "best balance (default)",
+        score: "89% on eval",
+        recommended: true,
+      }),
+    ).toBe("★ Claude Opus 5.5 · best balance (default) · 89% on eval");
+    expect(modelOptionLabel({ id: "org/llama-3", label: "org/llama-3" })).toBe("llama-3");
+    expect(modelOptionLabel({ id: "m", label: "m", score: "70% on eval" })).toBe("m · 70% on eval");
   });
 });

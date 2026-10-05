@@ -203,3 +203,56 @@ def test_cache_stays_bounded(monkeypatch):
         providers._cached(f"k{i}", lambda: ["m"])
     assert len(providers._cache) <= 10
     assert "k24" in providers._cache  # the newest entry is kept
+
+
+# ------------------------------------------------------------------ eval scores
+
+
+def _result(path, provider, model, hits, total=35, seconds=2.0):
+    import json as _json
+
+    path.write_text(
+        _json.dumps(
+            {
+                "provider": provider,
+                "model": model,
+                "accuracy": hits / total,
+                "hits": hits,
+                "total": total,
+                "median_seconds": seconds,
+                "results": [],
+            }
+        )
+    )
+
+
+def test_menu_shows_eval_scores_and_recommends_the_best(tmp_path):
+    _result(tmp_path / "opus.json", "claude", "claude-opus-5-5", 31)
+    _result(tmp_path / "haiku.json", "claude", "claude-haiku-4-5", 27)
+    _result(tmp_path / "smoke.json", "claude", "claude-sonnet-5-5", 5, total=5)  # --limit run
+    (tmp_path / "notes.json").write_text("{}")  # not a results file
+    s = settings(eval_results_dir=tmp_path)
+    models = {m["id"]: m for m in list_models(s, "claude", None).models}
+    assert models["claude-opus-5-5"]["score"] == "89% on eval"
+    assert models["claude-opus-5-5"].get("recommended") is True
+    assert models["claude-haiku-4-5"]["score"] == "77% on eval"
+    assert "recommended" not in models["claude-haiku-4-5"]
+    assert "score" not in models["claude-sonnet-5-5"]  # smoke runs don't count
+
+
+def test_newest_run_wins_and_ties_go_to_the_faster_model(tmp_path):
+    import os
+
+    _result(tmp_path / "a-old.json", "groq", "fast", 20, seconds=1.0)
+    _result(tmp_path / "b-new.json", "groq", "fast", 30, seconds=1.0)
+    os.utime(tmp_path / "a-old.json", (1, 1))
+    _result(tmp_path / "slow.json", "groq", "slow", 30, seconds=9.0)
+    s = settings(eval_results_dir=tmp_path, groq_models=["fast", "slow"])
+    models = {m["id"]: m for m in list_models(s, "groq", None).models}
+    assert models["fast"]["score"] == "86% on eval"
+    assert models["fast"].get("recommended") and not models["slow"].get("recommended")
+
+
+def test_no_results_means_no_labels(tmp_path):
+    s = settings(eval_results_dir=tmp_path / "missing")
+    assert all("score" not in m for m in list_models(s, "claude", "k").models)

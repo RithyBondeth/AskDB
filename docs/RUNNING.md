@@ -335,7 +335,21 @@ uv run python eval/compare.py --readme
 The free tier allows only a few requests a minute. `--delay` waits that many
 seconds between questions, and a question that hits the rate limit waits a
 minute and is asked again (up to 3 times), so rate limits don't count as wrong
-answers. Claude runs use API credits. Local runs are free but slower. Commit the files
+answers. Claude runs use API credits. Local runs are free but slower.
+
+The model menu in the app reads these result files. After a full run, that model
+shows its score, such as "89% on eval", and the most accurate measured model of
+each provider is marked with ★. Runs with fewer than 20 questions (`--limit`) are
+ignored, and if a model was run several times, the newest file counts. To label
+the menu on a server, commit the files in `eval/results/`, or point
+`ASKDB_EVAL_RESULTS_DIR` at a folder that has them.
+
+To compare models within one provider, run each with `--model`:
+
+```bash
+uv run python eval/run_eval.py --provider claude --model claude-haiku-4-5 --out eval/results/claude-haiku-4-5.json
+uv run python eval/run_eval.py --provider claude --model claude-opus-5-5 --out eval/results/claude-opus-5-5.json
+``` Commit the files
 in `eval/results/` so you can track accuracy over time.
 
 To add questions, append lines to `eval/dataset.jsonl`:
@@ -399,6 +413,7 @@ model keys in the app instead of the two key variables.
 | `ASKDB_MAX_UPLOAD_MB` | `50` | Maximum size of one upload |
 | `ASKDB_MAX_UPLOADS` | `20` | Maximum number of uploads per browser |
 | `ASKDB_MAX_TOTAL_UPLOADS` | `200` | Maximum number of uploads on the server |
+| `ASKDB_EVAL_RESULTS_DIR` | `eval/results` | Eval result files that label the model menu ([section 9](#9-measure-accuracy-evaluation)) |
 
 Frontend setting, in `frontend/.env.local`:
 
