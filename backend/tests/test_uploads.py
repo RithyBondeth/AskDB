@@ -245,14 +245,15 @@ def test_uploads_survive_restart(registry, db_path):
     assert fresh.get(info.id).schema.tables[0].name == "sales"
 
 
-def test_uploaded_db_prompt_has_no_chinook_examples_and_real_date(registry):
+def test_uploaded_db_prompt_has_its_own_examples_and_real_date(registry):
     import datetime as dt
 
     info = registry.add([("sales.csv", SALES_CSV)])
     db = registry.get(info.id)
     gen = db.generator_for("total amount", provider="claude", api_key="k")
     assert "Artist" not in gen.system_prompt
-    assert "Examples:" not in gen.system_prompt
+    assert "Examples:" in gen.system_prompt
+    assert "FROM sales" in gen.system_prompt  # examples written for this upload
     assert dt.date.today().isoformat() in gen.system_prompt
     assert "CREATE TABLE sales" in gen.system_prompt
 

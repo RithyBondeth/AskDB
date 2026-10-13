@@ -12,6 +12,7 @@ from sqlalchemy import Engine
 
 from askdb.config import Settings, get_settings
 from askdb.db import make_engine
+from askdb.examples import schema_examples
 from askdb.execute import Answer, EventHandler, answer, run_sql
 from askdb.generate import (
     ClaudeGenerator,
@@ -67,7 +68,8 @@ class AskDB:
     settings: Settings
     engine: Engine
     schema: Schema
-    # Few-shot examples written for this database (none for uploads).
+    # Few-shot examples: hand-written for the sample, generated for uploads, none
+    # for live connections.
     examples: list[tuple[str, str]] = field(default_factory=lambda: list(FEW_SHOT_EXAMPLES))
     # "Today" for relative dates. None means the real current date.
     fixed_date: str | None = None
@@ -97,22 +99,31 @@ class AskDB:
     def for_sqlite_file(
         cls, path: str, settings: Settings | None = None, client: anthropic.Anthropic | None = None
     ) -> AskDB:
-        """An uploaded SQLite file: no schema-specific examples, real dates."""
-        return cls.for_database(f"sqlite:///{path}", settings, client)
+        """An uploaded SQLite file: examples generated from its own schema, real dates."""
+        return cls.for_database(f"sqlite:///{path}", settings, client, generate_examples=True)
 
     @classmethod
     def for_database(
-        cls, url: str, settings: Settings | None = None, client: anthropic.Anthropic | None = None
+        cls,
+        url: str,
+        settings: Settings | None = None,
+        client: anthropic.Anthropic | None = None,
+        generate_examples: bool = False,
     ) -> AskDB:
-        """An uploaded file or a database someone connected: no schema-specific
-        examples, real dates."""
+        """An uploaded file or a database someone connected, with real dates.
+
+        `generate_examples` builds few-shot examples from the schema by running a
+        few small queries (askdb.examples). Uploads get them; live connections
+        don't, since those queries would run against someone's real database each
+        time it's opened."""
         settings = settings or get_settings()
         engine = make_engine(url, settings.statement_timeout_s)
+        schema = introspect(engine)
         return cls(
             settings=settings,
             engine=engine,
-            schema=introspect(engine),
-            examples=[],
+            schema=schema,
+            examples=schema_examples(schema, engine) if generate_examples else [],
             fixed_date=None,
             _client=client,
         )

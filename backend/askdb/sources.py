@@ -25,6 +25,7 @@ from sqlalchemy.exc import ArgumentError
 
 from askdb.config import Settings, get_settings
 from askdb.db import make_engine
+from askdb.examples import suggest_questions
 from askdb.importers import (
     CSV_SUFFIXES,
     SQLITE_SUFFIXES,
@@ -33,7 +34,7 @@ from askdb.importers import (
     csvs_to_sqlite,
 )
 from askdb.pipeline import AskDB
-from askdb.schema import Schema, introspect
+from askdb.schema import introspect
 
 SAMPLE_ID = "sample"
 _ID = re.compile(r"^[0-9a-f]{32}$")
@@ -144,56 +145,6 @@ class SourceInfo:
 
     def visible_to(self, owner: str | None) -> bool:
         return not self.owner or self.owner == _owner_hash(owner)
-
-
-_DATE_LIKE = re.compile(r"date|time|day|month|year|_at$|_on$", re.I)
-_MONEY_LIKE = re.compile(r"revenue|amount|total|price|sales|cost|value|profit|spend|income", re.I)
-_LABEL_LIKE = re.compile(r"name|title|category|product|region|country|city|type|status", re.I)
-_NUMERIC_TYPES = ("INT", "REAL", "NUM", "DEC", "FLOAT", "DOUBLE")
-
-
-def _ranked(columns: list[str], prefer: re.Pattern[str]) -> list[str]:
-    """Columns matching `prefer` first, otherwise in table order."""
-    return sorted(columns, key=lambda c: 0 if prefer.search(c) else 1)
-
-
-def suggest_questions(schema: Schema, limit: int = 6) -> list[str]:
-    """Simple starter questions built from the schema, so an unfamiliar database
-    has something to click."""
-    out: list[str] = []
-    for t in sorted(schema.tables, key=lambda t: -len(t.columns)):
-        name = t.name.replace("_", " ")
-        dates = [c.name for c in t.columns if _DATE_LIKE.search(c.name)]
-        nums = _ranked(
-            [
-                c.name
-                for c in t.columns
-                if any(k in c.type.upper() for k in _NUMERIC_TYPES)
-                and not c.primary_key
-                and not c.name.lower().endswith("id")
-                and c.name not in dates
-            ],
-            _MONEY_LIKE,
-        )
-        labels = _ranked(
-            [
-                c.name
-                for c in t.columns
-                if ("CHAR" in c.type.upper() or "TEXT" in c.type.upper() or c.type == "")
-                and c.name not in dates
-            ],
-            _LABEL_LIKE,
-        )
-        measure = nums[0].replace("_", " ") if nums else ""
-        if labels and nums:
-            out.append(f"Top 10 {labels[0].replace('_', ' ')} by total {measure} in {name}")
-        if dates and nums:
-            out.append(f"Total {measure} per month in {name}")
-        if len(labels) > 1 and nums:
-            out.append(f"Total {measure} by {labels[1].replace('_', ' ')} in {name}")
-        out.append(f"How many rows are in {name}?")
-    seen: set[str] = set()
-    return [q for q in out if not (q in seen or seen.add(q))][:limit]
 
 
 class SourceRegistry:
