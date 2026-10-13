@@ -1,51 +1,68 @@
+<div align="center">
+
 # AskDB
+
+**Ask your database questions in plain English and get validated, read-only, self-correcting SQL, with results and charts.**
 
 [![CI](https://github.com/RithyBondeth/AskDB/actions/workflows/ci.yml/badge.svg)](https://github.com/RithyBondeth/AskDB/actions/workflows/ci.yml)
 
-**Ask your database questions in plain English.** AskDB turns a question into
-validated, read-only SQL, runs it, fixes its own mistakes when the database
-returns an error, and answers with a table and an automatically chosen chart.
+![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white)
+![Next.js](https://img.shields.io/badge/Next.js-000000?style=for-the-badge&logo=nextdotjs&logoColor=white)
+![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white)
+![Claude](https://img.shields.io/badge/Claude-D97757?style=for-the-badge&logo=anthropic&logoColor=white)
+![Google Gemini](https://img.shields.io/badge/Google_Gemini-8E75B2?style=for-the-badge&logo=googlegemini&logoColor=white)
+
+</div>
 
 <!-- Demo GIF: start the app with a model key, run `uv run scripts/record_demo.py`
      from the repo root, then replace this comment with ![AskDB demo](docs/demo.gif) -->
 
-**Features:** upload your own data (SQLite or CSV) or connect a live PostgreSQL or
-MySQL database · a plain-language answer above every result · follow-up
-questions in a chat thread · live pipeline progress (streamed) · self-correction
-you can inspect · edit and re-run the SQL · sortable, filterable results with
-bar, line, stacked-bar, pie and scatter charts · load more rows and export every
-row to CSV · history saved on the server that follows you to other devices ·
-share links to saved answers (`?a=`) or questions (`?q=`) · 👍/👎 feedback that
-becomes prompt examples and eval cases · ⌘K command palette · light and dark themes.
+---
 
-Works with a **free hosted model** by default (Google Gemini's free tier),
-**Claude** (Opus, Sonnet, Haiku or Fable), **Groq**, **OpenRouter**, **OpenAI**,
-or an **open-source model on your own machine**
-([Arctic-Text2SQL-R1-7B](https://hf.co/Snowflake/Arctic-Text2SQL-R1-7B), or any
-model you've installed in Ollama). Pick the provider and the exact model per
-question in the UI. With your own key, the menu lists every model that key can use.
+## Overview
 
-**Execution accuracy** on 35 Chinook questions (see [Evaluation](#evaluation);
-`eval/compare.py --readme` regenerates this table):
+AskDB is a natural-language-to-SQL agent. It turns a question into validated, read-only SQL and runs it. When the database returns an error, it fixes its own mistakes, then answers with a table, an automatically chosen chart, and a plain-language summary.
 
-<!-- eval-table:start -->
-| Model | Provider | Execution accuracy | Fixed by self-correction | Median s/question |
-| --- | --- | --- | --- | --- |
-| `gemini-flash-latest` | free | _not measured yet_ | | |
-| `claude-opus-5-5` | claude | _not measured yet_ | | |
-| `Arctic-Text2SQL-R1-7B` (Q4_K_M) | local | _not measured yet_ | | |
-<!-- eval-table:end -->
+It works with a **free hosted model** by default (Google Gemini's free tier), with **Claude**, **Groq**, **OpenRouter**, and **OpenAI**, or with an **open-source model on your own machine** ([Arctic-Text2SQL-R1-7B](https://hf.co/Snowflake/Arctic-Text2SQL-R1-7B) or any Ollama model). You choose the provider and model for each question.
 
-## How it works
+## Features
 
-```
+- **Your own data:** upload SQLite or CSV files, or connect a live PostgreSQL or MySQL database.
+- **Read-only, enforced twice:** a sqlglot validator plus a read-only database session.
+- **Self-correction:** database and validation errors go back to the model for up to two repairs, and you can inspect every attempt.
+- **Live pipeline progress** streamed over Server-Sent Events.
+- **Results:** sortable, filterable tables; bar, line, stacked-bar, pie and scatter charts; load-more paging; and full CSV export.
+- **Plain-language answer** above every result.
+- **Follow-up questions** in a chat thread, plus SQL editing and re-running.
+- **History** saved on the server, with share links (`?a=` for answers, `?q=` for questions).
+- **👍/👎 feedback** that becomes few-shot examples and eval cases.
+- **Bring your own key:** keys stay in the browser and are never stored or logged by the server.
+- **Schema linking** with BM25, and optionally embeddings, for large databases.
+- **⌘K command palette,** a hand-drawn "doodle" UI, and light and dark themes.
+- **Evaluation harness** for execution accuracy on Chinook, Spider, and BIRD.
+
+## Tech Stack
+
+| Area | Technology |
+| --- | --- |
+| Backend | Python 3.11+, FastAPI, SQLAlchemy, sqlglot, uv |
+| Frontend | Next.js (App Router), TypeScript, Tailwind CSS, Recharts |
+| Models | Anthropic Claude, Google Gemini, Groq, OpenRouter, OpenAI, Ollama |
+| Databases | SQLite (bundled Chinook sample), PostgreSQL, MySQL/MariaDB |
+| Testing | Pytest, Ruff, Vitest, Playwright smoke tests, GitHub Actions |
+
+## How It Works
+
+```text
 question
    │
    ▼
 [1 schema introspection] ──► [2 schema linking: pick relevant tables]
    │
    ▼
-[3 prompt: schema + few-shot examples + question] ──► Claude or open model ──► SQL
+[3 prompt: schema + few-shot examples + question] ──► model ──► SQL
    │
    ▼
 [4 validate: one statement? read-only? parses?] ──┐ fail
@@ -55,45 +72,38 @@ question
    │   error ─────────────────────────────────────┴──► error fed back to the model
    │ success                                           (up to 2 repairs)
    ▼
-[6 present: table + bar/line chart]
+[6 present: summary + table + chart]
 ```
 
 | Stage | Code |
 | --- | --- |
-| 1. Introspection | [`backend/askdb/schema.py`](backend/askdb/schema.py) `introspect` |
-| 2. Schema linking | [`backend/askdb/linking.py`](backend/askdb/linking.py) `SchemaIndex` |
-| 3. Generation | Claude: [`backend/askdb/generate.py`](backend/askdb/generate.py), [`prompts.py`](backend/askdb/prompts.py). Open model: [`backend/askdb/local.py`](backend/askdb/local.py) |
+| 1. Introspection | [`backend/askdb/schema.py`](backend/askdb/schema.py) |
+| 2. Schema linking | [`backend/askdb/linking.py`](backend/askdb/linking.py) |
+| 3. Generation | [`generate.py`](backend/askdb/generate.py), [`hosted.py`](backend/askdb/hosted.py), [`local.py`](backend/askdb/local.py), [`prompts.py`](backend/askdb/prompts.py) |
 | 4. Validation | [`backend/askdb/validate.py`](backend/askdb/validate.py) |
-| 5. Execute + self-correct | [`backend/askdb/execute.py`](backend/askdb/execute.py), [`db.py`](backend/askdb/db.py) |
-| 6. Presentation | [`backend/askdb/present.py`](backend/askdb/present.py) + the Next.js UI |
+| 5. Execute and self-correct | [`execute.py`](backend/askdb/execute.py), [`db.py`](backend/askdb/db.py) |
+| 6. Presentation | [`backend/askdb/present.py`](backend/askdb/present.py) and the Next.js UI |
 
-## Stack
+## Getting Started
 
-| Layer | Choice |
-| --- | --- |
-| Database | SQLite with the bundled [Chinook](https://github.com/lerocha/chinook-database) sample (Postgres supported via `ASKDB_DATABASE_URL`) |
-| LLM | Claude (Opus 5.5 by default, plus Sonnet 5.5, Haiku 4.5 and Fable 5.1) through the Anthropic Python SDK; Gemini's free tier, Groq, OpenRouter and OpenAI through their OpenAI-compatible APIs; or [Arctic-Text2SQL-R1-7B](https://hf.co/Snowflake/Arctic-Text2SQL-R1-7B) (open, Apache-2.0) or another Ollama model |
-| DB access | SQLAlchemy |
-| SQL parsing | sqlglot |
-| API | FastAPI |
-| UI | Next.js (App Router) + Tailwind + Recharts, with a hand-drawn "doodle" design and [Open Doodles](https://www.opendoodles.com) illustrations |
-| Eval | Execution accuracy on question → gold-SQL pairs |
+### Prerequisites
 
-## Run it locally
+- Python 3.11+ and [uv](https://docs.astral.sh/uv/)
+- Node.js 20+
+- A free [Gemini API key](https://aistudio.google.com/apikey), pasted into the app (an Anthropic key is optional)
 
-> The full guide, covering configuration, the open model, your own database,
-> and troubleshooting, is in **[docs/RUNNING.md](docs/RUNNING.md)**. Quick version:
+### Installation
 
-Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/), Node 20+, and a
-free [Gemini API key](https://aistudio.google.com/apikey) (no credit card).
-An [Anthropic API key](https://platform.claude.com/) is optional, for Claude.
-You paste the key into the app (key button in the top bar), not into a config file.
+```bash
+git clone https://github.com/RithyBondeth/AskDB.git
+cd AskDB
+```
 
 **Backend** (port 8000):
 
 ```bash
 cd backend
-cp .env.example .env          # optional: server-side keys; users can add their own in the app
+cp .env.example .env      # optional server-side keys
 uv sync
 uv run uvicorn api.main:app --reload --port 8000
 ```
@@ -102,238 +112,87 @@ uv run uvicorn api.main:app --reload --port 8000
 
 ```bash
 cd frontend
-cp .env.example .env.local
 npm install
 npm run dev
 ```
 
-Open http://localhost:3000.
+Open [http://localhost:3000](http://localhost:3000). The full guide, covering configuration, the open model, your own database, and troubleshooting, is in **[docs/RUNNING.md](docs/RUNNING.md)**.
 
-**Open model** (optional, free, runs offline). Install [Ollama](https://ollama.com), then:
+### Optional: Open Model
 
 ```bash
 ollama pull hf.co/mradermacher/Arctic-Text2SQL-R1-7B-GGUF:Q4_K_M   # 4.8 GB
 ```
 
-Pick **Open model** in the UI, or set `ASKDB_PROVIDER=local` to make it the
-default. A 7B model at 4-bit needs about 6 GB of free RAM. It is slow on CPU,
-because it reasons step by step before answering. On a weak laptop, use
-`:Q3_K_M` (3.9 GB), or try
-[XiYanSQL-QwenCoder-3B](https://hf.co/XGenerationLab/XiYanSQL-QwenCoder-3B-2504).
-To use vLLM, llama.cpp, or LM Studio instead of Ollama, set
-`ASKDB_LOCAL_API=openai` and `ASKDB_LOCAL_BASE_URL` to the server.
+Pick **Open model** in the UI, or set `ASKDB_PROVIDER=local`.
 
-**Command line**, without the UI:
+### Command Line
 
 ```bash
 cd backend
 uv run askdb "Which artist has the most albums?"
-uv run askdb --show-schema "Revenue per year"
 uv run askdb --provider local "How many tracks are in each genre?"
 ```
 
-**Tests:**
+### Testing
 
 ```bash
-cd backend && uv run pytest
-cd frontend && npm run lint && npm run build && npm run e2e   # e2e: browser smoke tests
+cd backend && uv run ruff check . && uv run ruff format --check . && uv run pytest -q
+cd frontend && npm run lint && npm run typecheck && npm test && npm run build
 ```
 
 ## API
 
 | Method | Path | Description |
 | --- | --- | --- |
-| `POST` | `/api/ask` | `{"question": "...", "provider": "claude" \| "local", "context": [{"question", "sql"}]}` → SQL, explanation, columns, rows, chart spec, every attempt, and the model that answered. `provider`, `context` (up to 5 earlier turns, for follow-ups), and `database` (an upload's id; default is the sample) are optional. `/api/run` also takes `database` |
-| `POST` | `/api/ask/stream` | Same request as `/api/ask`, answered as Server-Sent Events: `stage`, `generated`, `attempt_failed` while it runs, then `result` (followed by `summary`) or `error` |
-| `POST` | `/api/run` | `{"sql": "..."}` → runs SQL you edited, behind the same read-only validation |
-| `POST` | `/api/rows` | `{"sql", "database", "offset", "limit"}` → the next page of an answer's rows (re-validated) |
-| `POST` | `/api/export` | `{"sql", "database"}` → every row as streamed CSV, up to `ASKDB_EXPORT_ROW_LIMIT` |
-| `POST` | `/api/databases/connect` | `{"url": "postgresql://...", "name"}` → connects a live PostgreSQL or MySQL database (the URL is never returned) |
-| `GET` / `DELETE` | `/api/history?database=` | This browser's saved answers, newest first / delete them |
-| `GET` / `DELETE` | `/api/history/{id}` | One saved answer (yours, or a shared one) / delete it |
-| `POST` | `/api/history/{id}/share` | `{"shared": true}` → anyone with the link can open the saved answer |
-| `POST` | `/api/feedback` | `{"answer_id", "question", "sql", "rating": 1 \| -1, "corrected_sql"}` → stores 👍/👎 |
-| `GET` | `/api/schema?database=` | Tables, columns (with primary keys), and suggested questions |
-| `GET` | `/api/databases` | The sample plus uploaded databases, and the upload limits |
-| `POST` | `/api/databases` | Multipart `files` (one SQLite file, or CSVs) and optional `name` → a new database |
-| `DELETE` | `/api/databases/{id}` | Delete an upload |
-| `POST` | `/api/keys/check` | `{"provider": "free" \| "claude"}` with the key in `X-AskDB-Api-Key` → whether it works (lists models; no tokens used) |
-| `GET` | `/api/health` | Status, dialect, table count, available models, and which have a server key |
+| `POST` | `/api/ask` | Question → SQL, explanation, rows, chart spec, and every attempt |
+| `POST` | `/api/ask/stream` | Same as `/api/ask`, streamed as Server-Sent Events |
+| `POST` | `/api/run` | Run edited SQL behind the same read-only validation |
+| `POST` | `/api/rows` | Next page of an answer's rows |
+| `POST` | `/api/export` | Every row as streamed CSV |
+| `GET` / `POST` / `DELETE` | `/api/databases` | List, upload, or delete databases |
+| `POST` | `/api/databases/connect` | Connect a live PostgreSQL or MySQL database |
+| `GET` / `DELETE` | `/api/history` | Saved answers |
+| `POST` | `/api/history/{id}/share` | Share a saved answer |
+| `POST` | `/api/feedback` | Store 👍/👎 feedback |
+| `GET` | `/api/schema` | Tables, columns, and suggested questions |
+| `POST` | `/api/keys/check` | Check that a model key works |
+| `GET` | `/api/health` | Status, dialect, and available models |
 
-`/api/ask` and `/api/ask/stream` accept the user's own key for the chosen
-provider in the `X-AskDB-Api-Key` header; it overrides the server key for that
-request.
-
-When every attempt fails, `/api/ask` returns 422 with the failed attempts, so the
-UI can show what was tried.
-
-## Design decisions
-
-**Read-only, enforced twice.** Model output never runs unchecked.
-`validate.py` parses the SQL with sqlglot and accepts exactly one `SELECT` or
-`UNION`/`INTERSECT`/`EXCEPT` statement. It rejects stacked statements and
-anything containing writes, DDL, `PRAGMA`, `ATTACH`, `SELECT INTO`, or
-`FOR UPDATE`, plus functions that act instead of read: changing settings
-(`set_config`), sleeping, signalling or locking other sessions, reading server
-files, large objects, `dblink`, and SQLite's `load_extension`. Separately, the database connection is opened read-only (SQLite
-`mode=ro`, Postgres `default_transaction_read_only`, MySQL/MariaDB a read-only
-session), so a statement the parser misses still can't change data. Other
-database types are refused rather than run with weaker guarantees.
-`tests/test_validate.py` and `tests/test_execute.py` check both layers, and CI
-checks the session settings against real Postgres and MySQL servers. Read-only doesn't limit what a
-`SELECT` can *read*, so on Postgres connect as a dedicated low-privilege role
-([setup](docs/RUNNING.md#a-postgresql-role-for-askdb)): as a superuser, a query
-could read files on the database server.
-
-**Bring your own key.** Users paste a model key in the app instead of editing
-server files. It's kept in their browser's localStorage and sent as a header
-with each question; the backend uses it for that one request and never stores
-or logs it, so a public deployment doesn't spend the host's quota. A server key
-in `.env` is an optional fallback.
-
-**Model choice, without surprise bills.** The model menu comes from
-`GET /api/models` (`askdb/providers.py`). When the user's own key pays, Groq,
-OpenRouter, OpenAI and Gemini list every chat model that key can use, live from
-the provider. When the server's key pays, visitors can only pick the models the
-operator allowed (`ASKDB_*_MODELS`, by default just the default model), and the
-backend rejects anything else, so nobody can run an expensive model on the
-host's key. Claude models come from a fixed list, because the request options
-differ by model: Haiku 4.5, for example, takes neither adaptive thinking nor
-`effort`. Fable 5.1 costs 2.5× Opus, so it's only offered with the user's own
-key unless the operator adds it.
-
-**Self-correction.** Database errors (unknown column, bad join) *and*
-validation failures (syntax errors, blocked statements) are sent back to the
-model with the failed SQL, up to `ASKDB_MAX_RETRIES` (default 2) repairs.
-Blocked SQL gets a chance to be rewritten as a safe query but is never executed.
-
-**Bounded queries.** Each statement has a timeout (SQLite through a progress
-handler, Postgres through `statement_timeout`, MySQL `max_execution_time`,
-MariaDB `max_statement_time`) and results are capped at `ASKDB_ROW_LIMIT` rows.
-
-**Schema linking.** Chinook has 11 tables, so the whole schema goes into the
-prompt. Above 15 tables, `SchemaIndex` picks about 8: it ranks tables by BM25
-over their names, column names and comments and, when `ASKDB_EMBEDDING_MODEL`
-is set, by embedding similarity too (merged by reciprocal rank fusion). It then
-adds the tables they reference and junction tables that connect two picked
-tables, so the joins are possible. If the embedding API fails, keyword ranking
-carries on alone.
-
-**Summaries and feedback.** After the result streams in, the same model writes
-one or two sentences answering the question from the first 30 rows (the open
-model, which only writes SQL well, gets a template sentence instead). 👍 on an
-answer, or 👎 then a corrected query, is stored with the question; the most
-similar verified pairs join that browser's prompts for that database as
-few-shot examples, and `eval/export_feedback.py` turns them into eval cases.
-
-**Fixed reference date.** Chinook's invoices end in December 2013, so relative
-questions like "last quarter" are resolved against `ASKDB_REFERENCE_DATE`
-(default `2013-12-31`). Set it to empty for live data.
-
-**Open model with its own prompt.** Small SQL models are very sensitive to the
-prompt (the Arctic paper reports large gains from the prompt format alone).
-`local.py` therefore reproduces the prompt from Snowflake's official evaluation
-code: the OmniSQL instruction, ChatML, a `<think>` pre-fill, and taking the last
-```` ```sql ```` block. It sends this raw so Ollama doesn't add a second chat
-template, and uses greedy decoding to match how the benchmark numbers were
-measured. The model was trained single-turn, so failed attempts for
-self-correction go into the question instead of a chat history. The validator,
-read-only connection, and retry loop are shared with Claude, so both models get
-the same safety guarantees.
-
-**Uploads are untrusted.** A SQLite upload must start with the SQLite file
-header and pass `PRAGMA quick_check`. CSVs are parsed into a new database that
-AskDB creates itself, with column types inferred and names converted to
-`snake_case`. Every SQLite connection sets `trusted_schema = OFF`, so functions
-named in a malicious schema don't run, and is opened read-only. Size and count
-limits apply. Database ids are checked against a strict pattern, so they can't
-be used to reach other files. Uploads get no Chinook few-shot examples, and
-"today" is the real date.
-
-**Uploads are private to the browser that made them.** There are no accounts:
-the browser generates a random id, keeps it in `localStorage`, and sends it with
-every request. Each upload is saved under a hash of that id, and any other id
-gets a 404 for it, the same as for a database that doesn't exist. Each browser
-may keep `ASKDB_MAX_UPLOADS` uploads, and `ASKDB_MAX_TOTAL_UPLOADS` caps the
-server's total disk use. This is isolation, not authentication: anyone who
-copies the id from a browser gets that browser's uploads, and clearing site data
-loses access. Uploads made before this change have no owner and stay visible to
-everyone. Set `ASKDB_ALLOW_UPLOADS=false` if a public demo shouldn't store files
-at all.
-
-**Free model by default.** Testing shouldn't cost money, so the default
-provider is a free hosted model: Google Gemini's free tier through its
-OpenAI-compatible endpoint (`askdb/hosted.py`). It gets the same prompt,
-few-shot examples, follow-up context, error feedback, and validation as Claude.
-Groq, OpenRouter and OpenAI are built-in providers too, and any other
-OpenAI-compatible chat API (Hugging Face, LM Studio) works by changing
-`ASKDB_FREE_BASE_URL` and `ASKDB_FREE_MODEL`. Free tiers
-have rate limits, and Google may use free-tier prompts to improve its products,
-so use Claude or the local model for private data.
-
-**Follow-ups.** The UI sends the last three answered questions and their SQL
-as `context`. Claude sees them as earlier conversation turns. The open model is
-single-turn, so they go into its prompt as "earlier in this conversation".
-Schema linking also uses the earlier questions, so a follow-up keeps the
-tables it builds on.
-
-**Edited SQL is not trusted either.** `/api/run` uses the same validator and
-read-only connection as generated SQL, so editing a query can't be used to
-write to the database.
-
-**Prompt caching.** The system prompt (schema plus examples) is the same for
-every question, so it is cached. Only the question changes between requests.
+The user's own model key travels in the `X-AskDB-Api-Key` header and overrides the server key for that request.
 
 ## Evaluation
 
-`backend/eval/dataset.jsonl` holds question → gold-SQL pairs for Chinook. The
-harness runs each question through the full pipeline and checks whether the
-predicted query returns the same rows as the gold query:
+Execution accuracy on 35 Chinook questions (`eval/compare.py --readme` regenerates this table):
 
-- Row order is ignored unless the item is marked `"ordered": true`.
-- Column order doesn't matter, and extra columns are allowed.
-- Floats are rounded to 2 decimal places, and NULLs are handled.
-- Both queries are compared on their full results, not the row-capped ones.
+<!-- eval-table:start -->
+| Model | Provider | Execution accuracy | Fixed by self-correction | Median s/question |
+| --- | --- | --- | --- | --- |
+| `gemini-flash-latest` | free | _not measured yet_ | | |
+| `claude-opus-5-5` | claude | _not measured yet_ | | |
+| `Arctic-Text2SQL-R1-7B` (Q4_K_M) | local | _not measured yet_ | | |
+<!-- eval-table:end -->
 
 ```bash
 cd backend
 uv run python eval/run_eval.py --limit 5                                   # smoke run
 uv run python eval/run_eval.py --delay 5 --out eval/results/gemini-free.json
 uv run python eval/run_eval.py --provider claude --out eval/results/claude-opus-5-5.json
-uv run python eval/run_eval.py --provider local --out eval/results/arctic-7b-q4.json
-uv run python eval/compare.py --readme   # table into README.md + questions where they differ
+uv run python eval/compare.py --readme
 ```
 
-Free-model runs are limited by the provider's rate limits (Gemini's free tier
-allows a few requests per minute, so a full run takes a while): `--delay` spaces
-the questions out, and a rate-limited question waits a minute and is asked again
-rather than counted as wrong. Claude runs make
-real paid API calls. Local runs are free but slower. Commit the
-results files to track accuracy across prompt and model changes. The model menu
-reads them too: each measured model shows its score (for example "89% on eval"),
-and the most accurate one of each provider gets a ★. Only full runs of 20 or
-more questions count, not `--limit` smoke runs. The dataset has 35 items.
+A prediction counts as correct when it returns the same rows as the gold query. Row order is ignored unless the item is marked as ordered, column order doesn't matter, and floats are rounded to two decimal places.
 
-### Standard benchmarks (Spider, BIRD)
+### Standard Benchmarks
 
-Chinook's 35 questions were written for this project, so they say little about
-how AskDB compares with other systems. `eval/benchmarks.py` turns the
-[Spider](https://yale-lily.github.io/spider) or [BIRD](https://bird-bench.github.io)
-dev set (downloaded separately) into an eval set: a reproducible subset spread
-across all their databases, each question run against its own SQLite file.
-BIRD's annotator hints go with the question, as in BIRD's own setup.
+`eval/benchmarks.py` turns the [Spider](https://yale-lily.github.io/spider) or [BIRD](https://bird-bench.github.io) dev set into a reproducible subset. These runs use AskDB's own matching rules, so they are comparable across AskDB runs but not identical to the official leaderboard metrics.
 
 ```bash
-cd backend
 uv run python eval/benchmarks.py spider --source ~/data/spider --limit 200
-uv run python eval/run_eval.py --dataset eval/benchmarks/spider-dev-200.jsonl \
-    --delay 5 --out eval/results/spider-gemini-free.json
+uv run python eval/run_eval.py --dataset eval/benchmarks/spider-dev-200.jsonl --delay 5 \
+    --out eval/results/spider-gemini-free.json
 uv run python eval/compare.py --dataset spider-dev-200 --readme
 ```
-
-These are execution accuracy on a subset, with AskDB's own matching rules above,
-so they're comparable across AskDB runs but not identical to the official
-leaderboards' metrics.
 
 **Spider dev** (subset):
 
@@ -351,49 +210,47 @@ leaderboards' metrics.
 | _not measured yet_ | | | | |
 <!-- eval-table:bird:end -->
 
-## Project layout
+## Security Notes
 
-```
-backend/
-  askdb/           pipeline: schema, prompts, generate (Claude), hosted (free model),
-                   local (open model),
-                   validate, execute, present; sources + importers (uploads)
-  api/main.py      FastAPI app
-  data/            chinook.sqlite (bundled sample) and uploads/ (git-ignored)
-  eval/            dataset.jsonl, run_eval.py, compare.py
-  tests/           pytest suite (no network needed)
-frontend/
-  src/app/         page + API route handlers (proxy to the backend)
-  src/components/  question box, attempts, table, chart, schema panel
-  src/lib/         helpers (streaming, formatting, keys), with Vitest tests beside them
-scripts/
-  record_demo.py   records docs/demo.gif from the running app
-.github/workflows/
-  ci.yml           lint, format, tests, typecheck, and build on every push and PR
-```
+- **Read-only, enforced twice:** the validator accepts exactly one `SELECT`-style statement and blocks functions that act instead of read (changing settings with `set_config`, sleeping, signalling or locking other sessions, reading server files, large objects, `dblink`, and SQLite's `load_extension`). The connection itself is also read-only (SQLite `mode=ro`, PostgreSQL `default_transaction_read_only`, a read-only MySQL session).
+- **Bounded queries:** per-statement timeouts and row caps.
+- **Untrusted uploads:** SQLite header and `PRAGMA quick_check` validation, `trusted_schema = OFF`, and size and count limits.
+- **Per-browser isolation** for uploads and history. This is isolation, not authentication. Set `ASKDB_ALLOW_UPLOADS=false` on public demos.
+- **No surprise bills:** visitors using the server's key can only choose operator-approved models.
+- On PostgreSQL, connect as a dedicated low-privilege role ([setup](docs/RUNNING.md#a-postgresql-role-for-askdb)).
 
-Before pushing, run what CI runs:
+## Project Structure
 
-```bash
-cd backend && uv run ruff check . && uv run ruff format --check . && uv run pytest -q
-cd frontend && npm run lint && npm run typecheck && npm test && npm run build
+```text
+AskDB/
+├── backend/
+│   ├── askdb/        # Pipeline: schema, linking, prompts, generation, validation,
+│   │                 # execution, presentation, providers, uploads, storage
+│   ├── api/main.py   # FastAPI app
+│   ├── data/         # Bundled Chinook sample database
+│   ├── eval/         # Datasets, eval runner, benchmarks, comparison
+│   └── tests/        # Pytest suite
+├── frontend/
+│   ├── src/app/      # Page and API route handlers (proxy to the backend)
+│   ├── src/components/
+│   ├── src/lib/      # Streaming, formatting, keys, with Vitest tests
+│   └── e2e/          # Playwright smoke tests
+├── scripts/          # Demo recording
+└── docs/RUNNING.md   # Full setup guide
 ```
 
 ## Credits
 
-Illustrations are from [Open Doodles](https://www.opendoodles.com) by
-[Pablo Stanley](https://twitter.com/pablostanley), released under
-[CC0](https://creativecommons.org/publicdomain/zero/1.0/). The SVGs were taken
-from [react-open-doodles](https://github.com/lunahq/react-open-doodles) (MIT),
-minified, and recolored to match the theme (`frontend/src/lib/doodles.ts`).
+Illustrations are from [Open Doodles](https://www.opendoodles.com) by Pablo Stanley ([CC0](https://creativecommons.org/publicdomain/zero/1.0/)), adapted from [react-open-doodles](https://github.com/lunahq/react-open-doodles) (MIT).
 
-## Roadmap
+## Author
 
-- [x] Week 1: sample DB, introspection, end-to-end generate-and-run
-- [x] Week 2: read-only validation, timeouts, self-correction loop, tests
-- [x] Week 3: web UI with table and automatic chart, few-shot prompt
-- [x] Open model: Arctic-Text2SQL-R1-7B via Ollama, switchable per question
-- [x] Upload your own data: SQLite files or CSVs
-- [x] Free hosted model as the default (Gemini free tier or any OpenAI-compatible API)
-- [ ] Week 4: grow the eval set, record Claude vs. open-model accuracy, demo GIF, deploy
-- [ ] Stretch: embedding-based schema linking, point it at your own data
+**Rithy Bondeth** — Full Stack Developer & AI Engineer
+
+[![Portfolio](https://img.shields.io/badge/Portfolio-0A0A0A?style=for-the-badge&logo=vercel&logoColor=white)](https://bondeth.dev)
+[![GitHub](https://img.shields.io/badge/GitHub-181717?style=for-the-badge&logo=github&logoColor=white)](https://github.com/RithyBondeth)
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-0A66C2?style=for-the-badge&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/rithy-bondeth-484073282/)
+
+## License
+
+Distributed under the MIT License. See [`LICENSE`](LICENSE) for details.
