@@ -107,6 +107,20 @@ class Settings(BaseSettings):
 
     # Saved answers (history that follows the browser's id) and 👍/👎 feedback.
     store_path: Path = BACKEND_DIR / "data" / "askdb.sqlite"
+    # Token usage and estimated cost of every model call, kept in the store for
+    # `askdb --usage`. Records no questions or results.
+    track_usage: bool = True
+    # Prices per million tokens for models AskDB doesn't know, or to override its
+    # built-in Claude prices: {"model-id": {"input": 0.5, "output": 1.5}} (optional
+    # "cache_read" and "cache_write"). Unpriced models are tracked as tokens only.
+    model_prices: dict[str, dict[str, float]] = {}
+
+    # Logs: one line per request and one per answer, on stderr.
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+    log_format: Literal["text", "json"] = "text"
+    # Include the question in each answer's log line. Off by default: questions
+    # can contain whatever people type.
+    log_questions: bool = False
     save_history: bool = True
     max_saved_answers: int = 500  # per browser
     # Questions the same browser marked correct (or corrected) for the same
@@ -115,6 +129,17 @@ class Settings(BaseSettings):
 
     # Eval results (eval/run_eval.py --out) label measured models in the model menu.
     eval_results_dir: Path = BACKEND_DIR / "eval" / "results"
+
+    @field_validator("model_prices")
+    @classmethod
+    def _known_price_fields(cls, v: dict[str, dict[str, float]]) -> dict[str, dict[str, float]]:
+        allowed = {"input", "output", "cache_read", "cache_write"}
+        for model, fields in v.items():
+            if unknown := set(fields) - allowed:
+                raise ValueError(f"{model}: unknown price fields {sorted(unknown)}")
+            if not {"input", "output"} <= set(fields):
+                raise ValueError(f"{model}: needs at least 'input' and 'output' prices")
+        return v
 
     @field_validator(
         "anthropic_api_key",

@@ -18,7 +18,10 @@ import threading
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from askdb.usage import Usage
 
 _ID = re.compile(r"^[0-9a-f]{32}$")
 
@@ -53,6 +56,22 @@ CREATE TABLE IF NOT EXISTS feedback (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS feedback_db ON feedback (database, owner);
+
+-- One row per model call: tokens and estimated cost, no questions or results.
+CREATE TABLE IF NOT EXISTS usage (
+    request_id TEXT NOT NULL,     -- one question (its SQL attempts and summary)
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,          -- the model that answered
+    purpose TEXT NOT NULL,        -- "sql" or "summary"
+    paid_by TEXT NOT NULL,        -- "server" (its key), "user" (their own key), "local"
+    input_tokens INTEGER NOT NULL,
+    output_tokens INTEGER NOT NULL,
+    cache_read_tokens INTEGER NOT NULL,
+    cache_write_tokens INTEGER NOT NULL,
+    cost_usd REAL,                -- NULL when the model has no known price
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS usage_time ON usage (created_at);
 """
 
 
@@ -305,3 +324,50 @@ class Store:
             params = (database,)
         order = " ORDER BY created_at DESC, rowid DESC"
         return [dict(r) for r in self._exec(query + order, params)]
+
+    # ------------------------------------------------------------ usage
+
+    def add_usage(self, request_id: str, paid_by: str, calls: list[Usage]) -> None:
+        now = _now()
+        with self._lock:
+            self._conn.executemany(
+                "INSERT INTO usage VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    (
+                        request_id,
+                        c.provider,
+                        c.model,
+                        c.purpose,
+                        paid_by,
+                        c.input_tokens,
+                        c.output_tokens,
+                        c.cache_read_tokens,
+                        c.cache_write_tokens,
+                        c.cost_usd,
+                        now,
+                    )  # fmt: skip
+                    for c in calls
+                ],
+            )
+            self._conn.commit()
+
+    def usage_report(self, days: int = 7) -> list[dict[str, Any]]:
+        """Totals per day, provider, model and payer over the last `days` days,
+        newest first. `unpriced` counts calls whose cost isn't known (their cost
+        isn't in `cost_usd`)."""
+        since = (dt.datetime.now(dt.UTC) - dt.timedelta(days=days)).isoformat(timespec="seconds")
+        rows = self._exec(
+            """
+            SELECT substr(created_at, 1, 10) AS day, provider, model, paid_by,
+                   COUNT(DISTINCT request_id) AS questions, COUNT(*) AS calls,
+                   SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens,
+                   SUM(cache_read_tokens) AS cache_read_tokens,
+                   SUM(cache_write_tokens) AS cache_write_tokens,
+                   SUM(cost_usd) AS cost_usd, SUM(cost_usd IS NULL) AS unpriced
+            FROM usage WHERE created_at >= ?
+            GROUP BY day, provider, model, paid_by
+            ORDER BY day DESC, cost_usd DESC
+            """,
+            (since,),
+        )
+        return [dict(r) for r in rows]

@@ -38,10 +38,20 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="list the models a hosted provider (default: free) offers your key, then exit",
     )
+    parser.add_argument(
+        "--usage",
+        type=int,
+        nargs="?",
+        const=7,
+        metavar="DAYS",
+        help="print model usage and estimated cost for the last DAYS days (default 7), then exit",
+    )
     args = parser.parse_args(argv)
 
     if args.list_models:
         return _list_models(args.provider if args.provider in HOSTED else "free")
+    if args.usage is not None:
+        return _usage(args.usage)
     if not args.question:
         parser.error('ask a question, e.g. askdb "Which artist has the most albums?"')
 
@@ -93,6 +103,55 @@ def _list_models(provider: str) -> int:
     print(f"Models at {cfg.base_url} (current {env}: {cfg.default}):")
     for m in models:
         print(f"  {m}")
+    return 0
+
+
+def _usage(days: int) -> int:
+    """Usage recorded by the server (ASKDB_TRACK_USAGE), per day and model."""
+    from askdb.config import get_settings
+    from askdb.store import Store
+
+    settings = get_settings()
+    if not settings.store_path.exists():
+        print(f"No usage recorded yet ({settings.store_path} doesn't exist).")
+        return 0
+    store = Store(settings.store_path)
+    try:
+        report = store.usage_report(days)
+    finally:
+        store.close()
+    if not report:
+        print(f"No model calls in the last {days} days.")
+        return 0
+
+    def cost(r: dict) -> str:
+        if r["cost_usd"] is None:
+            return "unpriced"
+        return f"${r['cost_usd']:.4f}" + (f" (+{r['unpriced']} unpriced)" if r["unpriced"] else "")
+
+    columns = ["day", "provider", "model", "paid by", "questions", "calls", "tokens in",
+               "tokens out", "cache read", "cache write", "est. cost"]  # fmt: skip
+    rows = [
+        [
+            r["day"],
+            r["provider"],
+            r["model"],
+            r["paid_by"],
+            r["questions"],
+            r["calls"],
+            r["input_tokens"],
+            r["output_tokens"],
+            r["cache_read_tokens"],
+            r["cache_write_tokens"],
+            cost(r),
+        ]  # fmt: skip
+        for r in report
+    ]
+    _print_table(columns, rows)
+    server = sum(r["cost_usd"] or 0 for r in report if r["paid_by"] == "server")
+    print(f"\nEstimated spend on the server's keys, last {days} days: ${server:.4f}")
+    if any(r["unpriced"] for r in report):
+        print("Some models have no known price; set ASKDB_MODEL_PRICES to include them.")
     return 0
 
 
