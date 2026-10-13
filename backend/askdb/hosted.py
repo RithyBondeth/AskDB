@@ -14,6 +14,7 @@ import httpx
 from askdb.generate import (
     Generation,
     GenerationError,
+    ProviderUnavailableError,
     Repair,
     Turn,
     build_messages,
@@ -127,10 +128,16 @@ class HostedGenerator:
                 },
             )
         except httpx.ConnectError as e:
-            raise GenerationError(f"Cannot reach the {self.label} API at {self.base_url}.") from e
+            raise ProviderUnavailableError(
+                f"Cannot reach the {self.label} API at {self.base_url}."
+            ) from e
         except httpx.TimeoutException as e:
-            raise GenerationError(f"The {self.label} took too long to answer. Try again.") from e
+            raise ProviderUnavailableError(
+                f"The {self.label} took too long to answer. Try again."
+            ) from e
 
+        if res.status_code == 429 or res.status_code >= 500:
+            raise ProviderUnavailableError(self._explain(res))
         if res.status_code >= 400:
             raise GenerationError(self._explain(res))
         try:

@@ -7,7 +7,7 @@ import pytest
 
 from askdb.config import Settings
 from askdb.execute import answer
-from askdb.generate import GenerationError, Repair, Turn
+from askdb.generate import GenerationError, ProviderUnavailableError, Repair, Turn
 from askdb.hosted import HostedGenerator
 from askdb.pipeline import AskDB
 from askdb.providers import fetch_hosted_models
@@ -86,6 +86,17 @@ def test_http_errors_are_explained(status, body, match):
     gen = make(lambda r: httpx.Response(status, json=body))
     with pytest.raises(GenerationError, match=match):
         gen.generate("q")
+
+
+@pytest.mark.parametrize(
+    ("status", "unavailable"), [(429, True), (503, True), (401, False), (404, False)]
+)
+def test_outages_are_marked_unavailable(status, unavailable):
+    # The eval leaves these out of the accuracy instead of scoring them as wrong.
+    gen = make(lambda r: httpx.Response(status, json={"error": {"message": "x"}}))
+    with pytest.raises(GenerationError) as exc:
+        gen.generate("q")
+    assert isinstance(exc.value, ProviderUnavailableError) is unavailable
 
 
 def test_empty_answer_is_an_error():

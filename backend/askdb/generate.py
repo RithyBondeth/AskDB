@@ -27,6 +27,11 @@ class CannotAnswerError(GenerationError):
     """The model judged the question unanswerable from the schema."""
 
 
+class ProviderUnavailableError(GenerationError):
+    """The provider couldn't answer right now (rate limit, quota, overload, network).
+    Says nothing about the question, so the eval doesn't score it as wrong."""
+
+
 @dataclass
 class Generation:
     sql: str

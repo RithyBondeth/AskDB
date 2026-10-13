@@ -16,6 +16,8 @@ import re
 import sys
 from pathlib import Path
 
+from askdb.scores import answered
+
 RESULTS = Path(__file__).with_name("results")
 README = Path(__file__).resolve().parents[2] / "README.md"
 # The README table lives between these markers so it can be regenerated.
@@ -38,10 +40,14 @@ def table(runs: list[dict]) -> list[str]:
     ]
     for r in sorted(runs, key=lambda r: -r["accuracy"]):
         total = r.get("total") or len(r["results"])
-        hits = r.get("hits", round(r["accuracy"] * total))
+        n = answered(r) or total
+        hits = r.get("hits", round(r["accuracy"] * n))
+        # Questions the provider never answered (outages) aren't in the accuracy.
+        skipped = f", {total - n} not answered" if n < total else ""
+        variant = f" ({r['variant']})" if r.get("variant") else ""
         lines.append(
-            f"| `{r['model']}` | {r.get('provider', 'claude')} "
-            f"| **{r['accuracy']:.1%}** ({hits}/{total}) "
+            f"| `{r['model']}`{variant} | {r.get('provider', 'claude')} "
+            f"| **{r['accuracy']:.1%}** ({hits}/{n}{skipped}) "
             f"| {r.get('self_corrected', '–')} | {r.get('median_seconds', '–')} |"
         )
     return lines

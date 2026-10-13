@@ -397,9 +397,23 @@ uv run python eval/compare.py --readme
 ```
 
 The free tier allows only a few requests a minute. `--delay` waits that many
-seconds between questions, and a question that hits the rate limit waits a
-minute and is asked again (up to 3 times), so rate limits don't count as wrong
-answers. Claude runs use API credits. Local runs are free but slower.
+seconds between questions. A question the provider can't answer at all (a rate
+limit, a used-up quota, an overloaded or unreachable server) waits a minute and
+is asked again, up to 3 times. If it still gets no answer, it's marked `SKIP` and
+left out of the accuracy rather than counted as wrong, and the summary says how
+many were skipped. Claude runs use API credits. Local runs are free but slower.
+
+**Few-shot examples.** Uploads get examples generated from their own schema
+instead of the hand-written Chinook ones. To see what that costs or gains, run
+Chinook the same way, or with no examples at all:
+
+```bash
+uv run python eval/run_eval.py --examples generated --out eval/results/gemini-generated.json
+uv run python eval/run_eval.py --examples none --out eval/results/gemini-no-examples.json
+```
+
+These runs are marked as experiments: `compare.py` labels them, and they never
+set a model's score in the menu.
 
 **Eval cases from feedback.** Answers people marked 👍, or corrected after a 👎,
 can be exported in the same format and scored like the main set:
@@ -415,8 +429,9 @@ people clicked.
 
 The model menu in the app reads these result files. After a full run, that model
 shows its score, such as "89% on eval", and the most accurate measured model of
-each provider is marked with ★. Runs with fewer than 20 questions (`--limit`) are
-ignored, and if a model was run several times, the newest file counts. To label
+each provider is marked with ★. Runs where fewer than 20 questions were answered
+(`--limit` runs, or runs cut short by rate limits) are ignored, and if a model was
+run several times, the newest file counts. To label
 the menu on a server, commit the files in `eval/results/`, or point
 `ASKDB_EVAL_RESULTS_DIR` at a folder that has them.
 

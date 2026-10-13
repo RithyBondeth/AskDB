@@ -3,7 +3,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "eval"))
 
-from run_eval import results_match  # noqa: E402
+import anthropic  # noqa: E402
+import httpx  # noqa: E402
+from run_eval import is_unavailable, results_match  # noqa: E402
+
+from askdb.generate import GenerationError, ProviderUnavailableError  # noqa: E402
 
 
 def test_unordered_match_ignores_row_and_column_order():
@@ -47,3 +51,16 @@ def test_compare_updates_only_the_readme_table(tmp_path):
     readme.write_text(f"intro\n{START}\nold table\n{END}\noutro\n")
     update_readme(["| new |"], readme)
     assert readme.read_text() == f"intro\n{START}\n| new |\n{END}\noutro\n"
+
+
+def test_outages_are_told_apart_from_wrong_answers():
+    req = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+
+    def status(code):
+        return anthropic.APIStatusError("x", response=httpx.Response(code, request=req), body=None)
+
+    assert is_unavailable(ProviderUnavailableError("rate limit"))
+    assert is_unavailable(status(429)) and is_unavailable(status(529))
+    assert is_unavailable(anthropic.APIConnectionError(request=req))
+    assert not is_unavailable(status(400))
+    assert not is_unavailable(GenerationError("no SQL block"))

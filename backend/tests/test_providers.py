@@ -256,3 +256,41 @@ def test_newest_run_wins_and_ties_go_to_the_faster_model(tmp_path):
 def test_no_results_means_no_labels(tmp_path):
     s = settings(eval_results_dir=tmp_path / "missing")
     assert all("score" not in m for m in list_models(s, "claude", "k").models)
+
+
+def _run_file(path, model, answered, hits, total=35, errors=0, legacy=False, **extra):
+    import json as _json
+
+    run = {
+        "provider": "free",
+        "model": model,
+        "accuracy": hits / (total if legacy else answered),
+        "hits": hits,
+        "total": total,
+        "results": [{"id": str(i), "error": "boom", "match": False} for i in range(errors)],
+        **extra,
+    }
+    if not legacy:
+        run["answered"] = answered
+    path.write_text(_json.dumps(run))
+
+
+def test_runs_cut_short_by_outages_dont_label_the_model(tmp_path):
+    # 26 of 35 questions hit rate limits: 9 answered is too few to judge by.
+    _run_file(tmp_path / "outage.json", "gemini-a", answered=9, hits=9)
+    # An older file can't tell outages from wrong answers, so errors mean "don't trust".
+    _run_file(tmp_path / "legacy.json", "gemini-b", answered=35, hits=9, errors=26, legacy=True)
+    # Enough answered: the accuracy is over the answered questions.
+    _run_file(tmp_path / "ok.json", "gemini-c", answered=30, hits=27)
+    # Experiments (other few-shot examples) never label the model.
+    _run_file(tmp_path / "exp.json", "gemini-d", answered=35, hits=35, variant="examples=none")
+    s = settings(
+        eval_results_dir=tmp_path,
+        free_model="gemini-a",
+        free_models=["gemini-a", "gemini-b", "gemini-c", "gemini-d"],
+    )
+    models = {m["id"]: m for m in list_models(s, "free", None).models}
+    assert "score" not in models["gemini-a"]
+    assert "score" not in models["gemini-b"]
+    assert models["gemini-c"]["score"] == "90% on eval"
+    assert "score" not in models["gemini-d"]
