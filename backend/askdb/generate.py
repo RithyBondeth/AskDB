@@ -73,12 +73,17 @@ def build_summary_prompt(
 
     shown = rows[:SUMMARY_ROWS]
     lines = [" | ".join(columns), *(" | ".join(cell(v) for v in r) for r in shown)]
+    # Say exactly how much of the result the model sees, so it doesn't present a
+    # maximum, minimum or total over these rows as if they were all of them.
     if truncated:
-        note = f"the first {len(rows)} rows; there are more"
+        note = (
+            f"the first {len(shown)} of the {len(rows)} rows returned; the query has "
+            "more rows than that, so this is NOT the whole result"
+        )
     elif len(shown) < len(rows):
-        note = f"{len(shown)} of {len(rows)} rows"
+        note = f"the first {len(shown)} of {len(rows)} rows, so this is NOT the whole result"
     else:
-        note = f"{len(rows)} {'row' if len(rows) == 1 else 'rows'}"
+        note = f"all {len(rows)} {'row' if len(rows) == 1 else 'rows'}"
     return SUMMARY_PROMPT.format(question=question, row_note=note, table="\n".join(lines))
 
 
