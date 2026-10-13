@@ -482,6 +482,7 @@ model keys in the app instead of the two key variables.
 | `ASKDB_DATABASE_URL` | bundled `data/chinook.sqlite` | Database to query (SQLAlchemy URL) |
 | `ASKDB_MAX_RETRIES` | `2` | Self-correction attempts after the first try |
 | `ASKDB_ROW_LIMIT` | `100` | Maximum rows returned |
+| `ASKDB_SAMPLE_VALUES` | `3` | Most common values shown per column in the schema the model sees, so it matches the data's spelling (`'USA'`, not `'United States'`). Only categorical text columns (50 or fewer distinct values) and one example per date column; keys, secrets and contact details (email, phone, address…) never. Read from each table's first 1000 rows when a question first uses it. `0` turns it off |
 | `ASKDB_STATEMENT_TIMEOUT_S` | `10` | Seconds before a query is cancelled |
 | `ASKDB_REFERENCE_DATE` | `2013-12-31` | "Today" for relative dates; set it empty for live data |
 | `ASKDB_CORS_ORIGINS` | `["http://localhost:3000"]` | Origins allowed to call the API directly |

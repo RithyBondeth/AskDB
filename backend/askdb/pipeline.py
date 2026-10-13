@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import logging
 import os
+import threading
 from dataclasses import dataclass, field
 
 import anthropic
@@ -26,7 +27,7 @@ from askdb.local import LocalGenerator
 from askdb.present import describe_result
 from askdb.prompts import FEW_SHOT_EXAMPLES
 from askdb.providers import HOSTED, PROVIDERS, Provider, default_model, hosted_config
-from askdb.schema import Schema, introspect
+from askdb.schema import Schema, Table, introspect, sample_values
 
 log = logging.getLogger("askdb.pipeline")
 
@@ -73,6 +74,9 @@ class AskDB:
     fixed_date: str | None = None
     _client: anthropic.Anthropic | None = field(default=None, repr=False)
     _index: SchemaIndex | None = field(default=None, repr=False)
+    # Tables whose sample values have been read (see with_samples).
+    _sampled: set[str] = field(default_factory=set, repr=False)
+    _sample_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     @property
     def index(self) -> SchemaIndex:
@@ -156,6 +160,19 @@ class AskDB:
         """The default model for a provider."""
         return default_model(self.settings, provider or self.default_provider)
 
+    def with_samples(self, tables: list[Table]) -> list[Table]:
+        """`tables`, with their columns' sample values read the first time each is
+        sent to the model. Only tables a question actually uses are read, so a
+        large live database isn't scanned up front."""
+        n = self.settings.sample_values
+        if n > 0:
+            with self._sample_lock:
+                for t in tables:
+                    if t.name not in self._sampled:
+                        sample_values(self.engine, t, n)
+                        self._sampled.add(t.name)
+        return tables
+
     def generator_for(
         self,
         question: str,
@@ -174,7 +191,7 @@ class AskDB:
         model = model or self.model_name(provider)
         # Link on the whole conversation so follow-ups keep the tables they build on.
         linking_text = " ".join([*(t.question for t in context or []), question])
-        tables = self.index.link(linking_text)
+        tables = self.with_samples(self.index.link(linking_text))
         known = {q.strip().lower() for q, _ in self.examples}
         extra = [e for e in extra_examples or [] if e[0].strip().lower() not in known]
         examples = self.examples + similar_examples(
