@@ -9,6 +9,8 @@ import json
 import logging
 import queue
 import threading
+import time
+import uuid
 from collections.abc import AsyncIterator, Iterator
 from functools import lru_cache
 from typing import Annotated, Literal
@@ -30,7 +32,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from askdb.config import get_settings
+from askdb import logs
+from askdb.config import Settings, get_settings
 from askdb.execute import Answer, AnswerError, Attempt, export_rows, fetch_rows
 from askdb.generate import CannotAnswerError, GenerationError, Turn
 from askdb.importers import UploadError
@@ -49,9 +52,11 @@ from askdb.providers import (
 from askdb.ratelimit import Limit, RateLimited, RateLimiter, Rule, client_ip
 from askdb.sources import SAMPLE_ID, SourceRegistry, valid_owner
 from askdb.store import Store
+from askdb.usage import Meter, metering, parse_prices
 from askdb.validate import InvalidSQLError, UnsafeQueryError, validate_sql
 
 log = logging.getLogger("askdb.api")
+logs.configure(get_settings())
 
 app = FastAPI(title="AskDB API", version="0.2.0")
 app.add_middleware(
@@ -301,6 +306,84 @@ def _model(db: AskDB, provider: Provider, model: str | None, api_key: str | None
         raise HTTPException(400, ErrorDetail(message=str(e)).model_dump()) from None
 
 
+# ---------------------------------------------------------------- logging
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """One log line per request: method, route, status and time. For a streamed
+    answer the time is until the stream starts; the answer's own line has the rest."""
+    started = time.perf_counter()
+    status = 500
+    try:
+        response = await call_next(request)
+        status = response.status_code
+        return response
+    finally:
+        route = request.scope.get("route")
+        path = getattr(route, "path", request.url.path)  # /api/history/{answer_id}, not the id
+        logs.event(
+            log,
+            "request",
+            logging.DEBUG if path == "/api/health" else logging.INFO,
+            method=request.method,
+            path=path,
+            status=status,
+            ms=round((time.perf_counter() - started) * 1000),
+        )
+
+
+def _meter(settings: Settings):
+    return metering(parse_prices(settings.model_prices))
+
+
+def _report(
+    meter: Meter,
+    store: Store,
+    db: AskDB,
+    req: AskRequest,
+    provider: Provider,
+    model: str,
+    api_key: str | None,
+    started: float,
+    ans: Answer | None = None,
+    error: Exception | None = None,
+) -> None:
+    """Log one line for a question, and save its model calls' usage."""
+    settings = db.settings
+    paid_by = "local" if provider == "local" else ("user" if api_key else "server")
+    attempts = ans.attempts if ans else getattr(error, "attempts", None)
+    cost = meter.cost_usd
+    logs.event(
+        log,
+        "answer",
+        logging.INFO if error is None else logging.WARNING,
+        provider=provider,
+        model=model,
+        paid_by=paid_by,
+        database="sample" if _database_id(req.database) == SAMPLE_ID else "upload",
+        dialect=db.schema.dialect,
+        ok=error is None,
+        error=type(error).__name__ if error else None,
+        attempts=len(attempts) if attempts else None,
+        rows=len(ans.result.rows) if ans else None,
+        truncated=ans.result.truncated if ans else None,
+        ms=round((time.perf_counter() - started) * 1000),
+        calls=len(meter.calls),
+        input_tokens=meter.total("input_tokens"),
+        output_tokens=meter.total("output_tokens"),
+        cache_read_tokens=meter.total("cache_read_tokens"),
+        cache_write_tokens=meter.total("cache_write_tokens"),
+        cost_usd=round(cost, 6) if cost is not None else None,
+        question=req.question if settings.log_questions else None,
+    )
+    if settings.track_usage and meter.calls:
+        try:
+            store.add_usage(uuid.uuid4().hex, paid_by, meter.calls)
+        except Exception:  # usage is bookkeeping; never fail the answer over it
+            log.exception("Could not save usage")
+
+
 # ---------------------------------------------------------------- rate limits
 
 
@@ -497,20 +580,24 @@ def ask(
     provider = req.provider or db.default_provider
     model = _model(db, provider, req.model, _key(api_key))
     throttle_ask(request, limiter, registry, provider, _key(api_key))
-    try:
-        ans = db.ask(
-            req.question.strip(),
-            provider=provider,
-            context=_context(req),
-            api_key=_key(api_key),
-            model=model,
-            extra_examples=_feedback_examples(store, req.database, owner),
-        )
-    except Exception as e:
-        status, detail = error_detail(e)
-        raise HTTPException(status, detail.model_dump()) from e
-    res = to_response(ans, provider, model)
-    res.summary = db.summarize(ans, provider, _key(api_key), model)
+    started = time.perf_counter()
+    with _meter(db.settings) as meter:
+        try:
+            ans = db.ask(
+                req.question.strip(),
+                provider=provider,
+                context=_context(req),
+                api_key=_key(api_key),
+                model=model,
+                extra_examples=_feedback_examples(store, req.database, owner),
+            )
+        except Exception as e:
+            _report(meter, store, db, req, provider, model, _key(api_key), started, error=e)
+            status, detail = error_detail(e)
+            raise HTTPException(status, detail.model_dump()) from e
+        res = to_response(ans, provider, model)
+        res.summary = db.summarize(ans, provider, _key(api_key), model)
+    _report(meter, store, db, req, provider, model, _key(api_key), started, ans=ans)
     _save(store, owner, req.database, res)
     return res
 
@@ -555,32 +642,39 @@ def ask_stream(
         events.put(event)
 
     def work() -> None:
+        started = time.perf_counter()
+        ans, failure = None, None
         try:
-            ans = db.ask(
-                req.question.strip(),
-                provider=provider,
-                context=_context(req),
-                on_event=on_event,
-                api_key=_key(api_key),
-                model=model,
-                extra_examples=_feedback_examples(store, req.database, owner),
-            )
-            result = to_response(ans, provider, model)
-            _save(store, owner, req.database, result)
-            events.put({"type": "result", "data": result.model_dump()})
-            if gone.is_set():
-                return
-            events.put({"type": "stage", "stage": "summarize"})
-            summary = db.summarize(ans, provider, _key(api_key), model)
-            if summary:
-                if result.id:
-                    store.update_answer(owner, result.id, {"summary": summary})
-                events.put({"type": "summary", "text": summary})
-        except ClientGone:
-            log.info("Client disconnected; stopped answering %r", req.question[:80])
-        except Exception as e:  # reported to the client as an event
-            status, detail = error_detail(e)
-            events.put({"type": "error", "status": status, "detail": detail.model_dump()})
+            with _meter(db.settings) as meter:
+                try:
+                    ans = db.ask(
+                        req.question.strip(),
+                        provider=provider,
+                        context=_context(req),
+                        on_event=on_event,
+                        api_key=_key(api_key),
+                        model=model,
+                        extra_examples=_feedback_examples(store, req.database, owner),
+                    )
+                    result = to_response(ans, provider, model)
+                    _save(store, owner, req.database, result)
+                    events.put({"type": "result", "data": result.model_dump()})
+                    if not gone.is_set():
+                        events.put({"type": "stage", "stage": "summarize"})
+                        summary = db.summarize(ans, provider, _key(api_key), model)
+                        if summary:
+                            if result.id:
+                                store.update_answer(owner, result.id, {"summary": summary})
+                            events.put({"type": "summary", "text": summary})
+                except ClientGone as e:
+                    failure = e
+                    log.info("Client disconnected; stopped answering")
+                except Exception as e:  # reported to the client as an event
+                    failure = e
+                    status, detail = error_detail(e)
+                    events.put({"type": "error", "status": status, "detail": detail.model_dump()})
+            # After the summary, which is part of the answer's cost.
+            _report(meter, store, db, req, provider, model, _key(api_key), started, ans, failure)
         finally:
             events.put(None)
 

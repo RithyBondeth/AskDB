@@ -526,7 +526,12 @@ model keys in the app instead of the two key variables.
 | `ASKDB_MAX_PAGE_ROWS` | `1000` | Most rows one **Load more** can fetch |
 | `ASKDB_EXPORT_ROW_LIMIT` | `100000` | Most rows a CSV export contains |
 | `ASKDB_SAVE_HISTORY` | `true` | Save answers on the server (history, share links) |
-| `ASKDB_STORE_PATH` | `data/askdb.sqlite` | Where saved answers and feedback are kept |
+| `ASKDB_STORE_PATH` | `data/askdb.sqlite` | Where saved answers, feedback and usage are kept |
+| `ASKDB_TRACK_USAGE` | `true` | Record each model call's tokens and estimated cost in the store, for `askdb --usage`. No questions or results are recorded |
+| `ASKDB_MODEL_PRICES` | `{}` | Prices per million tokens, as JSON: `{"gpt-5-mini": {"input": 0.25, "output": 2.0}}` (optional `cache_read`, `cache_write`). Claude models have built-in prices; the open model and the free provider count as $0; anything else is tracked as tokens only unless priced here |
+| `ASKDB_LOG_LEVEL` | `INFO` | `DEBUG` also logs health checks |
+| `ASKDB_LOG_FORMAT` | `text` | `json` for one JSON object per line (for log collectors) |
+| `ASKDB_LOG_QUESTIONS` | `false` | Include the question in each answer's log line |
 | `ASKDB_MAX_SAVED_ANSWERS` | `500` | Saved answers kept per browser (oldest go first) |
 | `ASKDB_FEEDBACK_EXAMPLES` | `3` | Verified answers added to a prompt as examples (`0` turns it off) |
 | `ASKDB_EVAL_RESULTS_DIR` | `eval/results` | Eval result files that label the model menu ([section 9](#9-measure-accuracy-evaluation)) |
@@ -625,6 +630,26 @@ header itself (nginx with `proxy_set_header X-Forwarded-For $remote_addr;`, or a
 platform edge like Railway's, Vercel's or Cloudflare's). Either way,
 `ASKDB_SERVER_KEY_ASKS_PER_DAY` counts every client together and can't be dodged.
 Counts are kept in memory per backend process and reset on restart.
+
+### Logs and usage
+
+The backend logs one line per request (method, route, status, time) and one per
+answer: provider, model, who paid (`server` for its key, `user` for a visitor's
+own key, `local`), attempts, rows, time, tokens and estimated cost. A failed
+question is logged too, with what its attempts spent. Questions aren't logged
+unless `ASKDB_LOG_QUESTIONS=true`. Set `ASKDB_LOG_FORMAT=json` to feed a log
+collector.
+
+Usage is also saved in the store, so you can see spend without a log pipeline:
+
+```bash
+uv run askdb --usage        # last 7 days, per day, provider, model and payer
+uv run askdb --usage 30
+```
+
+Costs are estimates from per-million-token prices (Claude's built in, as of
+2026-10-06; others from `ASKDB_MODEL_PRICES`), including cache reads and writes.
+Check your provider's billing for the real figure.
 
 ---
 

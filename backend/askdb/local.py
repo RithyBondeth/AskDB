@@ -16,6 +16,7 @@ from typing import Literal
 
 import httpx
 
+from askdb import usage
 from askdb.generate import Generation, GenerationError, Repair, Turn
 
 SYSTEM = (
@@ -203,7 +204,17 @@ class LocalGenerator:
                 },
             )
             res.raise_for_status()
-            return res.json()["response"]
+            body = res.json()
+            usage.record(
+                usage.Usage(
+                    "local",
+                    self.model,
+                    "sql",
+                    input_tokens=body.get("prompt_eval_count") or 0,
+                    output_tokens=body.get("eval_count") or 0,
+                )
+            )
+            return body["response"]
 
         res = self.client.post(
             f"{self.base_url}/v1/completions",
@@ -216,4 +227,6 @@ class LocalGenerator:
             },
         )
         res.raise_for_status()
-        return res.json()["choices"][0]["text"]
+        body = res.json()
+        usage.record(usage.from_openai(body, "local", self.model, "sql"))
+        return body["choices"][0]["text"]

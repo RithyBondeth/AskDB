@@ -8,6 +8,7 @@ from typing import Protocol
 
 import anthropic
 
+from askdb import usage
 from askdb.prompts import (
     DATE_RULE,
     FEW_SHOT_EXAMPLES,
@@ -188,6 +189,7 @@ class ClaudeGenerator:
             raise ProviderConfigError(
                 "No Anthropic credentials found. Set ANTHROPIC_API_KEY (see .env.example)."
             ) from e
+        usage.record(usage.from_anthropic(response, "claude", self.model, "sql"))
         if response.stop_reason == "refusal":
             raise GenerationError("The model declined to answer this question.")
         text = "".join(b.text for b in response.content if b.type == "text")
@@ -226,6 +228,7 @@ class ClaudeGenerator:
             ],
             **self._model_options(effort="low"),  # a short, simple task
         )
+        usage.record(usage.from_anthropic(response, "claude", self.model, "summary"))
         if response.stop_reason == "refusal":
             raise GenerationError("The model declined to summarize this result.")
         return clean_summary("".join(b.text for b in response.content if b.type == "text"))

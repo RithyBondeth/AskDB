@@ -11,6 +11,7 @@ import re
 
 import httpx
 
+from askdb import usage
 from askdb.generate import (
     Generation,
     GenerationError,
@@ -100,7 +101,7 @@ class HostedGenerator:
     def generate(self, question: str, repairs: list[Repair] | None = None) -> Generation:
         messages = [{"role": "system", "content": self.system_prompt}]
         messages += build_messages(question, repairs, self.context)
-        return parse_response(self._chat(messages))
+        return parse_response(self._chat(messages, purpose="sql"))
 
     def summarize(
         self, question: str, columns: list[str], rows: list[list], truncated: bool
@@ -111,9 +112,9 @@ class HostedGenerator:
             {"role": "system", "content": SUMMARY_SYSTEM},
             {"role": "user", "content": prompt},
         ]
-        return clean_summary(self._chat(messages, temperature=0.2))
+        return clean_summary(self._chat(messages, temperature=0.2, purpose="summary"))
 
-    def _chat(self, messages: list[dict], temperature: float = 0) -> str:
+    def _chat(self, messages: list[dict], temperature: float = 0, purpose: str = "sql") -> str:
         """The text of one chat completion, without any <think> reasoning."""
         if not self.api_key:
             raise ProviderConfigError(missing_key(self.provider))
@@ -144,9 +145,12 @@ class HostedGenerator:
         if res.status_code >= 400:
             raise GenerationError(self._explain(res))
         try:
-            choice = res.json()["choices"][0]
+            body = res.json()
+            # Tokens are spent even if the answer turns out empty or unusable.
+            usage.record(usage.from_openai(body, self.provider, self.model, purpose))
+            choice = body["choices"][0]
             text = choice["message"].get("content") or ""
-        except (ValueError, KeyError, IndexError, TypeError) as e:
+        except (ValueError, KeyError, IndexError, TypeError, AttributeError) as e:
             raise GenerationError(f"The {self.label} returned an unexpected response.") from e
         if not text.strip():
             reason = choice.get("finish_reason") or "no text"
