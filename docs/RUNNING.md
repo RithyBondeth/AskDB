@@ -402,7 +402,10 @@ seconds between questions. A question the provider can't answer at all (a rate
 limit, a used-up quota, an overloaded or unreachable server) waits a minute and
 is asked again, up to 3 times. If it still gets no answer, it's marked `SKIP` and
 left out of the accuracy rather than counted as wrong, and the summary says how
-many were skipped. Claude runs use API credits. Local runs are free but slower.
+many were skipped. A setup problem (a missing or rejected key, or a model the
+provider doesn't offer your key, such as one "no longer available to new users")
+stops the run at once, without writing a results file, since no question could
+succeed. Claude runs use API credits. Local runs are free but slower.
 
 **Few-shot examples.** Uploads get examples generated from their own schema
 instead of the hand-written Chinook ones. To see what that costs or gains, run

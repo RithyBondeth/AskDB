@@ -16,7 +16,7 @@ from askdb.examples import schema_examples
 from askdb.execute import Answer, EventHandler, answer, run_sql
 from askdb.generate import (
     ClaudeGenerator,
-    GenerationError,
+    ProviderConfigError,
     SQLGenerator,
     Turn,
     build_system_prompt,
@@ -222,7 +222,7 @@ class AskDB:
                 label=cfg.label,
             )
         if not api_key and not self.has_anthropic_credentials:
-            raise GenerationError(MISSING_ANTHROPIC_KEY)
+            raise ProviderConfigError(MISSING_ANTHROPIC_KEY)
         return ClaudeGenerator(
             system,
             model=model,

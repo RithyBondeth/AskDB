@@ -33,7 +33,7 @@ import anthropic
 from askdb.db import QueryError, run_query
 from askdb.examples import schema_examples
 from askdb.execute import AnswerError
-from askdb.generate import GenerationError, ProviderUnavailableError
+from askdb.generate import GenerationError, ProviderConfigError, ProviderUnavailableError
 from askdb.pipeline import AskDB
 from askdb.providers import PROVIDERS, resolve_model
 
@@ -58,6 +58,19 @@ def is_unavailable(e: Exception) -> bool:
     if isinstance(e, anthropic.APIStatusError):
         return e.status_code == 429 or e.status_code >= 500
     return isinstance(e, anthropic.APIConnectionError)  # includes timeouts
+
+
+def is_config_error(e: Exception) -> bool:
+    """No question can succeed until the setup changes: a missing or rejected key,
+    or a model the provider doesn't offer this key. Scoring that as wrong answers
+    would label the model "0% on eval", so the run stops instead."""
+    return isinstance(
+        e,
+        ProviderConfigError
+        | anthropic.AuthenticationError
+        | anthropic.PermissionDeniedError
+        | anthropic.NotFoundError,
+    )
 
 
 def _norm(v: Any) -> Any:
@@ -206,6 +219,12 @@ def main() -> int:
             record.update(sql=ans.sql, attempts=len(ans.attempts), match=ok)
             self_corrected += ok and len(ans.attempts) > 1
         except Exception as e:
+            if is_config_error(e):
+                print(f"\nStopped: {e}")
+                print(
+                    "Nothing was scored and no results file was written. Fix the setup and rerun."
+                )
+                return 2
             if not (is_unavailable(e) or isinstance(e, AnswerError | GenerationError | QueryError)):
                 raise
             ok = False
