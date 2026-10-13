@@ -63,6 +63,10 @@ class Settings(BaseSettings):
     local_timeout_s: float = 600.0
     max_retries: int = 2
     row_limit: int = 100
+    # Most common values shown per text column in the prompt's schema, so the model
+    # matches the data's spelling ('USA', not 'United States'). 0 turns it off.
+    # Read from the first 1000 rows of each table the first time it's used.
+    sample_values: int = 3
     statement_timeout_s: float = 10.0
     # Relative dates ("last quarter") are resolved against this date. Chinook's
     # invoices end in Dec 2013, so "today" is pinned there by default.
