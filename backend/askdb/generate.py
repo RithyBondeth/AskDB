@@ -28,6 +28,17 @@ class CannotAnswerError(GenerationError):
     """The model judged the question unanswerable from the schema."""
 
 
+class ProviderUnavailableError(GenerationError):
+    """The provider couldn't answer right now (rate limit, quota, overload, network).
+    Says nothing about the question, so the eval doesn't score it as wrong."""
+
+
+class ProviderConfigError(GenerationError):
+    """No request can succeed until the setup changes: a missing or rejected key,
+    or a model that doesn't exist or isn't offered to this key. Retrying won't
+    help, and it says nothing about the question, so the eval stops instead."""
+
+
 @dataclass
 class Generation:
     sql: str
@@ -74,12 +85,17 @@ def build_summary_prompt(
 
     shown = rows[:SUMMARY_ROWS]
     lines = [" | ".join(columns), *(" | ".join(cell(v) for v in r) for r in shown)]
+    # Say exactly how much of the result the model sees, so it doesn't present a
+    # maximum, minimum or total over these rows as if they were all of them.
     if truncated:
-        note = f"the first {len(rows)} rows; there are more"
+        note = (
+            f"the first {len(shown)} of the {len(rows)} rows returned; the query has "
+            "more rows than that, so this is NOT the whole result"
+        )
     elif len(shown) < len(rows):
-        note = f"{len(shown)} of {len(rows)} rows"
+        note = f"the first {len(shown)} of {len(rows)} rows, so this is NOT the whole result"
     else:
-        note = f"{len(rows)} {'row' if len(rows) == 1 else 'rows'}"
+        note = f"all {len(rows)} {'row' if len(rows) == 1 else 'rows'}"
     return SUMMARY_PROMPT.format(question=question, row_note=note, table="\n".join(lines))
 
 
@@ -170,7 +186,7 @@ class ClaudeGenerator:
         except TypeError as e:  # raised by the SDK when no credentials are configured
             if "authentication" not in str(e).lower():
                 raise
-            raise GenerationError(
+            raise ProviderConfigError(
                 "No Anthropic credentials found. Set ANTHROPIC_API_KEY (see .env.example)."
             ) from e
         usage.record(usage.from_anthropic(response, "claude", self.model, "sql"))

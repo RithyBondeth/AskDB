@@ -245,14 +245,15 @@ def test_uploads_survive_restart(registry, db_path):
     assert fresh.get(info.id).schema.tables[0].name == "sales"
 
 
-def test_uploaded_db_prompt_has_no_chinook_examples_and_real_date(registry):
+def test_uploaded_db_prompt_has_its_own_examples_and_real_date(registry):
     import datetime as dt
 
     info = registry.add([("sales.csv", SALES_CSV)])
     db = registry.get(info.id)
     gen = db.generator_for("total amount", provider="claude", api_key="k")
     assert "Artist" not in gen.system_prompt
-    assert "Examples:" not in gen.system_prompt
+    assert "Examples:" in gen.system_prompt
+    assert "FROM sales" in gen.system_prompt  # examples written for this upload
     assert dt.date.today().isoformat() in gen.system_prompt
     assert "CREATE TABLE sales" in gen.system_prompt
 
@@ -277,3 +278,91 @@ def test_suggestions_prefer_money_and_name_columns(registry):
         "Total revenue per month in orders",
         "Total revenue by product in orders",
     ]
+
+
+# ------------------------------------------------------------------ expiry and memory
+
+
+def _age(registry, source_id, days):
+    import os
+    import time
+
+    meta = registry.dir / f"{source_id}.json"
+    old = time.time() - days * 86400
+    os.utime(meta, (old, old))
+
+
+def _expiring(db_path, tmp_path, removed=None):
+    return SourceRegistry(
+        Settings(database_url=f"sqlite:///{db_path}", upload_dir=tmp_path / "u", upload_ttl_days=7),
+        on_remove=removed.append if removed is not None else None,
+    )
+
+
+def test_unused_uploads_expire_with_their_saved_answers(db_path, tmp_path):
+    removed: list[str] = []
+    registry = _expiring(db_path, tmp_path, removed)
+    stale = registry.add([("old.csv", SALES_CSV)])
+    fresh = registry.add([("new.csv", SALES_CSV)])
+    _age(registry, stale.id, 8)
+    _age(registry, fresh.id, 6)
+    assert registry.expire() == [stale.id]
+    assert removed == [stale.id]  # the API drops its saved answers here
+    assert not (registry.dir / f"{stale.id}.sqlite").exists()
+    assert [s.id for s in registry.list()] == ["sample", fresh.id]
+
+
+def test_unused_connections_expire_too(db_path, tmp_path):
+    # A saved connection string holds a password; an abandoned one shouldn't linger.
+    import json
+    from dataclasses import asdict
+
+    from askdb.sources import SourceInfo
+
+    registry = _expiring(db_path, tmp_path)
+    registry.dir.mkdir(parents=True)
+    info = SourceInfo(
+        id="ab" * 16, name="shop", kind="postgres", tables=3, size_bytes=0,
+        created_at="2026-01-01T00:00:00+00:00", url="postgresql://u:secret@db.example.com/shop",
+    )  # fmt: skip
+    (registry.dir / f"{info.id}.json").write_text(json.dumps(asdict(info)))
+    _age(registry, info.id, 30)
+    assert registry.expire() == [info.id]
+    assert not (registry.dir / f"{info.id}.json").exists()
+
+
+def test_using_an_upload_keeps_it(db_path, tmp_path):
+    registry = _expiring(db_path, tmp_path)
+    info = registry.add([("sales.csv", SALES_CSV)])
+    _age(registry, info.id, 8)
+    registry.get(info.id)  # a question was asked of it
+    assert registry.expire() == []
+
+
+def test_expiry_frees_room_for_new_uploads(registry):
+    registry.settings.upload_ttl_days = 7
+    old = [registry.add([(f"{i}.csv", SALES_CSV)], owner=ME) for i in range(3)]
+    with pytest.raises(UploadError, match="limit reached"):
+        registry.add([("one-more.csv", SALES_CSV)], owner=ME)
+    _age(registry, old[0].id, 30)
+    assert registry.add([("one-more.csv", SALES_CSV)], owner=ME)
+
+
+def test_zero_ttl_keeps_uploads_forever(registry):
+    registry.settings.upload_ttl_days = 0
+    info = registry.add([("sales.csv", SALES_CSV)])
+    _age(registry, info.id, 3650)
+    assert registry.expire() == []
+
+
+def test_least_recently_used_databases_are_closed(registry):
+    registry.settings.max_open_databases = 2
+    a, b, c = (registry.add([(f"{n}.csv", SALES_CSV)]) for n in "abc")
+    registry.get(a.id)
+    registry.get(b.id)
+    registry.get(a.id)  # a is now the most recently used
+    registry.get(c.id)  # opening c closes b
+    assert set(registry._cache) - {"sample"} == {a.id, c.id}
+    # A closed database reopens on its next use.
+    assert registry.get(b.id).run("SELECT COUNT(*) FROM b").result.rows == [[3]]
+    assert b.id in registry._cache and a.id not in registry._cache

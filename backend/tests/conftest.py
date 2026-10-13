@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from api.main import app, get_store
+from api.main import app, get_limiter, get_store
 from askdb.db import make_engine
 from askdb.generate import Generation, Repair
 from askdb.store import Store
@@ -63,3 +63,10 @@ class ScriptedGenerator:
 @pytest.fixture
 def scripted():
     return ScriptedGenerator
+
+
+@pytest.fixture(autouse=True)
+def _fresh_rate_limits():
+    """Each test starts with no requests counted against the API's limits."""
+    get_limiter().reset()
+    yield

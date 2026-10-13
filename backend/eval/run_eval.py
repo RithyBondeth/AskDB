@@ -8,6 +8,8 @@
     uv run python eval/run_eval.py --delay 5             # pace requests (free-tier limits)
     uv run python eval/run_eval.py --dataset eval/feedback.jsonl  # cases from 👍/👎 feedback
     uv run python eval/run_eval.py --dataset eval/benchmarks/spider-dev-200.jsonl  # benchmarks.py
+    uv run python eval/run_eval.py --examples generated  # as an upload: examples from the schema
+    uv run python eval/run_eval.py --examples none       # no few-shot examples at all
 
 Rows may name their own SQLite file ("database"), as benchmark rows do; the rest
 run against the configured database (ASKDB_DATABASE_URL, Chinook by default).
@@ -26,27 +28,49 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+import anthropic
+
 from askdb.db import QueryError, run_query
+from askdb.examples import schema_examples
 from askdb.execute import AnswerError
-from askdb.generate import GenerationError
+from askdb.generate import GenerationError, ProviderConfigError, ProviderUnavailableError
 from askdb.pipeline import AskDB
 from askdb.providers import PROVIDERS, resolve_model
 
 DATASET = Path(__file__).with_name("dataset.jsonl")
 # Gold queries can return more rows than the app shows; compare in full.
 COMPARE_LIMIT = 100_000
-# A rate-limited question says nothing about accuracy, so wait and ask again
-# rather than score it as wrong.
-RATE_LIMIT_WAIT_S = 60
-RATE_LIMIT_RETRIES = 3
+# A question the provider couldn't answer (rate limit, quota, overload) says
+# nothing about accuracy, so wait and ask again rather than score it as wrong.
+# If it still can't answer, the question is left out of the accuracy.
+UNAVAILABLE_WAIT_S = 60
+UNAVAILABLE_RETRIES = 3
 
 
 def load_dataset(path: Path = DATASET) -> list[dict]:
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
 
-def is_rate_limited(e: Exception) -> bool:
-    return isinstance(e, GenerationError) and "rate limit" in str(e).lower()
+def is_unavailable(e: Exception) -> bool:
+    """The provider failed to answer at all, as opposed to answering wrongly."""
+    if isinstance(e, ProviderUnavailableError):
+        return True
+    if isinstance(e, anthropic.APIStatusError):
+        return e.status_code == 429 or e.status_code >= 500
+    return isinstance(e, anthropic.APIConnectionError)  # includes timeouts
+
+
+def is_config_error(e: Exception) -> bool:
+    """No question can succeed until the setup changes: a missing or rejected key,
+    or a model the provider doesn't offer this key. Scoring that as wrong answers
+    would label the model "0% on eval", so the run stops instead."""
+    return isinstance(
+        e,
+        ProviderConfigError
+        | anthropic.AuthenticationError
+        | anthropic.PermissionDeniedError
+        | anthropic.NotFoundError,
+    )
 
 
 def _norm(v: Any) -> Any:
@@ -95,14 +119,18 @@ def results_match(pred: list[list], gold: list[list], ordered: bool) -> bool:
 
 
 def accuracy_by(results: list[dict], key: str) -> dict[str, tuple[int, int]]:
-    """{value of `key`: (hits, total)} over the results that have it."""
+    """{value of `key`: (hits, total)} over the answered results that have it."""
     out: dict[str, tuple[int, int]] = {}
     for r in results:
-        if r.get(key) is None:
+        if r.get(key) is None or r.get("unavailable"):
             continue
         hits, total = out.get(r[key], (0, 0))
         out[r[key]] = (hits + bool(r["match"]), total + 1)
     return out
+
+
+def _median(values: list[float]) -> float:
+    return sorted(values)[len(values) // 2] if values else 0
 
 
 def main() -> int:
@@ -128,12 +156,23 @@ def main() -> int:
         default=0.0,
         help="seconds to wait between questions (free tiers allow a few requests a minute)",
     )
+    parser.add_argument(
+        "--examples",
+        choices=["sample", "generated", "none"],
+        default="sample",
+        help="few-shot examples: the hand-written ones (default), the ones generated for "
+        "uploads, or none. Variant runs never label models in the menu.",
+    )
     args = parser.parse_args()
 
     rows = load_dataset(args.dataset)
     rows = rows[: args.limit] if args.limit else rows
     dataset = "chinook" if args.dataset.resolve() == DATASET.resolve() else args.dataset.stem
     default_db = AskDB.from_settings()
+    if args.examples == "generated":
+        default_db.examples = schema_examples(default_db.schema, default_db.engine)
+    elif args.examples == "none":
+        default_db.examples = []
     databases: dict[str, AskDB] = {}
 
     def database_for(row: dict) -> AskDB:
@@ -149,9 +188,12 @@ def main() -> int:
     provider = args.provider or db.default_provider
     # Runs on the server's keys, so the ASKDB_*_MODELS allowlists apply.
     model = resolve_model(db.settings, provider, args.model, None)
-    print(f"Dataset: {dataset} ({len(rows)} questions)\nProvider: {provider} ({model})\n")
+    print(
+        f"Dataset: {dataset} ({len(rows)} questions)\n"
+        f"Provider: {provider} ({model}), examples: {args.examples}\n"
+    )
 
-    results, hits, self_corrected = [], 0, 0
+    results, hits, self_corrected, unavailable = [], 0, 0, 0
     for i, row in enumerate(rows):
         if i and args.delay:
             time.sleep(args.delay)
@@ -162,32 +204,52 @@ def main() -> int:
         if row.get("difficulty"):
             record["difficulty"] = row["difficulty"]
         try:
-            for retry in range(RATE_LIMIT_RETRIES + 1):
+            for retry in range(UNAVAILABLE_RETRIES + 1):
                 try:
                     ans = db.ask(row["question"], provider=provider, model=model)
                     break
-                except GenerationError as e:
-                    if not is_rate_limited(e) or retry == RATE_LIMIT_RETRIES:
+                except Exception as e:
+                    if not is_unavailable(e) or retry == UNAVAILABLE_RETRIES:
                         raise
-                    print(f"      rate limited; waiting {RATE_LIMIT_WAIT_S}s")
-                    time.sleep(RATE_LIMIT_WAIT_S)
-                    started += RATE_LIMIT_WAIT_S  # don't count the wait as answer time
+                    print(f"      provider unavailable; waiting {UNAVAILABLE_WAIT_S}s")
+                    time.sleep(UNAVAILABLE_WAIT_S)
+                    started += UNAVAILABLE_WAIT_S  # don't count the wait as answer time
             pred = run_query(db.engine, ans.sql, COMPARE_LIMIT).rows
             ok = results_match(pred, gold, ordered=row.get("ordered", False))
             record.update(sql=ans.sql, attempts=len(ans.attempts), match=ok)
             self_corrected += ok and len(ans.attempts) > 1
-        except (AnswerError, GenerationError, QueryError) as e:
+        except Exception as e:
+            if is_config_error(e):
+                print(f"\nStopped: {e}")
+                print(
+                    "Nothing was scored and no results file was written. Fix the setup and rerun."
+                )
+                return 2
+            if not (is_unavailable(e) or isinstance(e, AnswerError | GenerationError | QueryError)):
+                raise
             ok = False
             record.update(sql=None, error=str(e), match=False)
+            if is_unavailable(e):
+                record["unavailable"] = True
+                unavailable += 1
         record["seconds"] = round(time.monotonic() - started, 1)
         hits += ok
         results.append(record)
-        print(f"{'PASS' if ok else 'FAIL'}  {row['id']:<24} {record.get('sql') or record['error']}")
+        status = "SKIP" if record.get("unavailable") else "PASS" if ok else "FAIL"
+        print(f"{status}  {row['id']:<24} {record.get('sql') or record['error']}")
 
     total = len(rows)
-    accuracy = hits / total if total else 0.0
-    print(f"\nExecution accuracy: {hits}/{total} = {accuracy:.1%}")
+    answered = total - unavailable
+    # Accuracy over the questions the provider actually answered.
+    accuracy = hits / answered if answered else 0.0
+    print(f"\nExecution accuracy: {hits}/{answered} = {accuracy:.1%}")
     print(f"Passed only after self-correction: {self_corrected}")
+    if unavailable:
+        print(
+            f"Not answered (provider unavailable): {unavailable}/{total}. These are left "
+            "out of the accuracy; if too few were answered, the run won't label the model "
+            "in the menu. Run again later, or with --delay."
+        )
     by_difficulty = accuracy_by(results, "difficulty")
     for level, (n_ok, n) in by_difficulty.items():
         print(f"  {level}: {n_ok}/{n} = {n_ok / n:.1%}")
@@ -199,12 +261,16 @@ def main() -> int:
             "provider": provider,
             "model": model,
             "effort": db.settings.effort if provider == "claude" else None,
+            # Set for experiments (e.g. other few-shot examples); None for standard runs.
+            "variant": None if args.examples == "sample" else f"examples={args.examples}",
             "accuracy": accuracy,
             "hits": hits,
+            "answered": answered,
             "total": total,
+            "unavailable": unavailable,
             "self_corrected": self_corrected,
             "by_difficulty": {k: {"hits": h, "total": n} for k, (h, n) in by_difficulty.items()},
-            "median_seconds": sorted(r["seconds"] for r in results)[total // 2] if total else 0,
+            "median_seconds": _median([r["seconds"] for r in results if not r.get("unavailable")]),
             "results": results,
         }
         args.out.write_text(json.dumps(summary, indent=2, default=str))

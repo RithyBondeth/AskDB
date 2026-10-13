@@ -15,6 +15,8 @@ from askdb import usage
 from askdb.generate import (
     Generation,
     GenerationError,
+    ProviderConfigError,
+    ProviderUnavailableError,
     Repair,
     Turn,
     build_messages,
@@ -115,7 +117,7 @@ class HostedGenerator:
     def _chat(self, messages: list[dict], temperature: float = 0, purpose: str = "sql") -> str:
         """The text of one chat completion, without any <think> reasoning."""
         if not self.api_key:
-            raise GenerationError(missing_key(self.provider))
+            raise ProviderConfigError(missing_key(self.provider))
         try:
             res = self.client.post(
                 f"{self.base_url}/chat/completions",
@@ -128,10 +130,18 @@ class HostedGenerator:
                 },
             )
         except httpx.ConnectError as e:
-            raise GenerationError(f"Cannot reach the {self.label} API at {self.base_url}.") from e
+            raise ProviderUnavailableError(
+                f"Cannot reach the {self.label} API at {self.base_url}."
+            ) from e
         except httpx.TimeoutException as e:
-            raise GenerationError(f"The {self.label} took too long to answer. Try again.") from e
+            raise ProviderUnavailableError(
+                f"The {self.label} took too long to answer. Try again."
+            ) from e
 
+        if res.status_code == 429 or res.status_code >= 500:
+            raise ProviderUnavailableError(self._explain(res))
+        if self._config_problem(res):
+            raise ProviderConfigError(self._explain(res))
         if res.status_code >= 400:
             raise GenerationError(self._explain(res))
         try:
@@ -147,11 +157,21 @@ class HostedGenerator:
             raise GenerationError(f"The {self.label} returned an empty answer ({reason}).")
         return _THINK.sub("", text)
 
+    @staticmethod
+    def _bad_key(res: httpx.Response, detail: str) -> bool:
+        # Gemini answers 400 (not 401) for a bad key.
+        return res.status_code in (401, 403) or (
+            res.status_code == 400 and "api key" in detail.lower()
+        )
+
+    def _config_problem(self, res: httpx.Response) -> bool:
+        """A rejected key, or a model this key can't use (404: unknown, retired, or
+        "no longer available to new users")."""
+        return res.status_code == 404 or self._bad_key(res, error_detail(res))
+
     def _explain(self, res: httpx.Response) -> str:
         detail = error_detail(res)
-        # Gemini answers 400 (not 401) for a bad key.
-        bad_key = res.status_code == 400 and "api key" in detail.lower()
-        if res.status_code in (401, 403) or bad_key:
+        if self._bad_key(res, detail):
             return f"The {self.label} API rejected the key (HTTP {res.status_code}): {detail}"
         if res.status_code == 404:
             return (

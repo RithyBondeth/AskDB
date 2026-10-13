@@ -3,7 +3,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "eval"))
 
-from run_eval import results_match  # noqa: E402
+import anthropic  # noqa: E402
+import httpx  # noqa: E402
+from run_eval import is_config_error, is_unavailable, results_match  # noqa: E402
+
+from askdb.generate import (  # noqa: E402
+    GenerationError,
+    ProviderConfigError,
+    ProviderUnavailableError,
+)
 
 
 def test_unordered_match_ignores_row_and_column_order():
@@ -47,3 +55,52 @@ def test_compare_updates_only_the_readme_table(tmp_path):
     readme.write_text(f"intro\n{START}\nold table\n{END}\noutro\n")
     update_readme(["| new |"], readme)
     assert readme.read_text() == f"intro\n{START}\n| new |\n{END}\noutro\n"
+
+
+def test_outages_are_told_apart_from_wrong_answers():
+    req = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+
+    def status(code):
+        return anthropic.APIStatusError("x", response=httpx.Response(code, request=req), body=None)
+
+    assert is_unavailable(ProviderUnavailableError("rate limit"))
+    assert is_unavailable(status(429)) and is_unavailable(status(529))
+    assert is_unavailable(anthropic.APIConnectionError(request=req))
+    assert not is_unavailable(status(400))
+    assert not is_unavailable(GenerationError("no SQL block"))
+
+
+def test_setup_problems_are_neither_outages_nor_wrong_answers():
+    req = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+
+    def status(cls, code):
+        return cls("x", response=httpx.Response(code, request=req), body=None)
+
+    assert is_config_error(ProviderConfigError("model not found"))
+    assert is_config_error(status(anthropic.NotFoundError, 404))
+    assert is_config_error(status(anthropic.AuthenticationError, 401))
+    assert not is_config_error(ProviderUnavailableError("503"))
+    assert not is_config_error(GenerationError("no SQL block"))
+    assert not is_unavailable(ProviderConfigError("model not found"))
+
+
+def test_eval_stops_on_a_missing_model_without_writing_a_score(monkeypatch, tmp_path, capsys):
+    import run_eval
+
+    from askdb.pipeline import AskDB
+
+    calls = []
+
+    def missing_model(self, question, **kw):
+        calls.append(question)
+        raise ProviderConfigError("Model “gemini-x” not found: no longer available.")
+
+    monkeypatch.setattr(AskDB, "ask", missing_model)
+    out = tmp_path / "result.json"
+    monkeypatch.setattr(
+        sys, "argv", ["run_eval.py", "--provider", "local", "--out", str(out), "--limit", "5"]
+    )
+    assert run_eval.main() == 2
+    assert len(calls) == 1  # stopped at the first question, no retries
+    assert not out.exists()  # so the model can't be labelled "0% on eval"
+    assert "no results file" in capsys.readouterr().out

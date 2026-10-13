@@ -189,19 +189,24 @@ def describe_result(columns: list[str], rows: list[list[Any]], truncated: bool =
     pairs = [(lbl, v) for lbl, v in pairs if v is not None]
     if not pairs:
         return f"{count.capitalize()}."
+    # With more rows than were returned, the highest and lowest seen may not be
+    # the real ones, so say they're among the rows shown.
+    scope = f"Among the first {len(rows)} rows (there are more), " if truncated else ""
     if kinds[label] == "temporal":
         (first_x, first_v), (last_x, last_v) = pairs[0], pairs[-1]
         peak_x, peak_v = max(pairs, key=lambda p: p[1])
-        return (
-            f"{_words(measure).capitalize()} went from {_fmt(first_v)} ({first_x}) to "
+        trend = (
+            f"{_words(measure)} went from {_fmt(first_v)} ({first_x}) to "
             f"{_fmt(last_v)} ({last_x}), peaking at {_fmt(peak_v)} in {peak_x}."
         )
+        return scope + trend if scope else trend[0].upper() + trend[1:]
     top_x, top_v = max(pairs, key=lambda p: p[1])
     low_x, low_v = min(pairs, key=lambda p: p[1])
-    return (
+    ranked = (
         f"{top_x} has the highest {_words(measure)} ({_fmt(top_v)}) and {low_x} the lowest "
-        f"({_fmt(low_v)}), across {count}."
+        f"({_fmt(low_v)})"
     )
+    return f"{scope}{ranked}." if scope else f"{ranked}, across {count}."
 
 
 def to_json_value(v: Any) -> Any:

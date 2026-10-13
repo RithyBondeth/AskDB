@@ -212,7 +212,7 @@ uv run python eval/compare.py --dataset spider-dev-200 --readme
 
 ## Security Notes
 
-- **Read-only, enforced twice:** the validator accepts exactly one `SELECT`-style statement, and the connection itself is read-only (SQLite `mode=ro`, PostgreSQL `default_transaction_read_only`, a read-only MySQL session).
+- **Read-only, enforced twice:** the validator accepts exactly one `SELECT`-style statement and blocks functions that act instead of read (changing settings with `set_config`, sleeping, signalling or locking other sessions, reading server files, large objects, `dblink`, and SQLite's `load_extension`). The connection itself is also read-only (SQLite `mode=ro`, PostgreSQL `default_transaction_read_only`, a read-only MySQL session).
 - **Bounded queries:** per-statement timeouts and row caps.
 - **Untrusted uploads:** SQLite header and `PRAGMA quick_check` validation, `trusted_schema = OFF`, and size and count limits.
 - **Per-browser isolation** for uploads and history. This is isolation, not authentication. Set `ASKDB_ALLOW_UPLOADS=false` on public demos.
