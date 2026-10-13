@@ -45,6 +45,13 @@ export default defineConfig({
         ASKDB_STORE_PATH: join(data, "askdb.sqlite"),
         ASKDB_UPLOAD_DIR: join(data, "uploads"),
         ASKDB_CORS_ORIGINS: `["http://127.0.0.1:${WEB}"]`,
+        // Every test comes from 127.0.0.1, so per-client limits would add up across
+        // tests (and CI retries). These tests check the app, not the limits.
+        ASKDB_ASK_PER_MINUTE: "0",
+        ASKDB_ASK_PER_DAY: "0",
+        ASKDB_SERVER_KEY_ASKS_PER_DAY: "0",
+        ASKDB_QUERIES_PER_MINUTE: "0",
+        ASKDB_DATABASES_PER_HOUR: "0",
       },
       timeout: 120_000,
       reuseExistingServer: !process.env.CI,

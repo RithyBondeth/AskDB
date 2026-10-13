@@ -88,6 +88,41 @@ class Settings(BaseSettings):
     # network addresses (the server's own network) through a connection string.
     allow_private_hosts: bool = True
 
+    # Uploads and saved connections nobody has used for this long are deleted,
+    # along with their saved answers (0 = keep forever). An abandoned connection
+    # string holds a password, so it shouldn't linger.
+    upload_ttl_days: float = 30
+    # Uploaded or connected databases kept open in memory; the least recently used
+    # are closed and reopen on their next use.
+    max_open_databases: int = 32
+
+    # Per-client request limits (by IP; 0 turns a limit off). The daily ask limit
+    # counts only questions answered on the server's model key: visitors using
+    # their own key pay for those themselves.
+    ask_per_minute: int = 10
+    ask_per_day: int = 200
+    # Questions per day on the server's key from all clients together. Unlike the
+    # per-client limits, this can't be dodged by faking an IP: it's what caps the
+    # operator's bill.
+    server_key_asks_per_day: int = 1000
+    # Running edited SQL, fetching more rows, and CSV exports, per minute.
+    queries_per_minute: int = 30
+    # Uploads and new connections, per hour.
+    databases_per_hour: int = 10
+    key_checks_per_minute: int = 10
+    # Proxies whose X-Forwarded-For header is believed (IPs or CIDR ranges): this
+    # machine and private networks, where the Next.js server reaches the backend
+    # from (same host, Docker, Railway's private network). Requests from public
+    # addresses never are. Narrow this if untrusted machines share your network.
+    trusted_proxies: list[str] = [
+        "127.0.0.0/8",
+        "::1",
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+        "fc00::/7",
+    ]
+
     # Embedding-based schema linking for large schemas (more than 15 tables).
     # Off unless a model is set; uses any OpenAI-compatible /embeddings API. The
     # base URL and key default to the free provider's (Gemini), e.g.

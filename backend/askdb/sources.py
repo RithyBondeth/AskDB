@@ -1,7 +1,9 @@
 """The databases AskDB can answer from: the configured sample plus uploads.
 
 Each upload is stored as `<id>.sqlite` with a `<id>.json` metadata file beside it
-in `upload_dir`, so uploads survive restarts.
+in `upload_dir`, so uploads survive restarts. The metadata file's modification
+time records when the database was last used; uploads and connections unused for
+`upload_ttl_days` are deleted.
 """
 
 from __future__ import annotations
@@ -15,7 +17,10 @@ import re
 import shutil
 import socket
 import threading
+import time
 import uuid
+from collections import OrderedDict
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -147,13 +152,28 @@ class SourceInfo:
         return not self.owner or self.owner == _owner_hash(owner)
 
 
+# Last-used times are written at most this often per database, not on every query.
+TOUCH_EVERY_S = 3600
+# How often reads sweep for expired databases (adding one also sweeps first).
+EXPIRE_EVERY_S = 3600
+
+
 class SourceRegistry:
-    def __init__(self, settings: Settings | None = None):
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        on_remove: Callable[[str], None] | None = None,
+    ):
         self.settings = settings or get_settings()
         self.dir = Path(self.settings.upload_dir)
-        self._cache: dict[str, AskDB] = {}
+        # Open pipelines, least recently used first. The sample is never closed.
+        self._cache: OrderedDict[str, AskDB] = OrderedDict()
         self._lock = threading.Lock()
         self._client: anthropic.Anthropic | None = None
+        # Called with the id of each database deleted or expired (to drop its
+        # saved answers).
+        self._on_remove = on_remove
+        self._last_expiry = 0.0
 
     # ------------------------------------------------------------ reading
 
@@ -169,23 +189,28 @@ class SourceRegistry:
         if not source_id or source_id == SAMPLE_ID:
             return self.sample()
         info = self._info(source_id, owner)
+        self._touch(source_id)
         with self._lock:
-            if source_id not in self._cache:
-                # Share one Anthropic client across databases.
-                client = self._cache[SAMPLE_ID].client if SAMPLE_ID in self._cache else None
-                if info.url:
-                    parsed, kind = parse_connection(info.url)
-                    if not self.settings.allow_private_hosts:
-                        check_public_host(parsed.host, parsed.port or DEFAULT_PORTS[kind])
-                    self._cache[source_id] = AskDB.for_database(info.url, self.settings, client)
-                else:
-                    self._cache[source_id] = AskDB.for_sqlite_file(
-                        str(self._db_path(info.id)), self.settings, client
-                    )
-            return self._cache[source_id]
+            if source_id in self._cache:
+                self._cache.move_to_end(source_id)
+                return self._cache[source_id]
+            # Share one Anthropic client across databases.
+            client = self._cache[SAMPLE_ID].client if SAMPLE_ID in self._cache else None
+            if info.url:
+                parsed, kind = parse_connection(info.url)
+                if not self.settings.allow_private_hosts:
+                    check_public_host(parsed.host, parsed.port or DEFAULT_PORTS[kind])
+                db = AskDB.for_database(info.url, self.settings, client)
+            else:
+                db = AskDB.for_sqlite_file(str(self._db_path(info.id)), self.settings, client)
+            self._cache[source_id] = db
+            self._evict()
+            return db
 
     def list(self, owner: str | None = None) -> list[SourceInfo]:
         """The sample plus the uploads `owner` can see."""
+        if time.monotonic() - self._last_expiry > EXPIRE_EVERY_S:
+            self.expire()
         sample = self.sample()
         items = [
             SourceInfo(
@@ -211,6 +236,7 @@ class SourceRegistry:
     # ------------------------------------------------------------ writing
 
     def _check_room(self, mine: str) -> None:
+        self.expire()  # free room held by abandoned databases before checking the caps
         uploads = self._uploads()
         if sum(u.owner == mine for u in uploads) >= self.settings.max_uploads:
             raise UploadError(
@@ -321,12 +347,26 @@ class SourceRegistry:
         if source_id == SAMPLE_ID:
             raise UploadError("The sample database can't be deleted.")
         self._info(source_id, owner)
-        with self._lock:
-            db = self._cache.pop(source_id, None)
-        if db is not None:
-            db.engine.dispose()
-        self._db_path(source_id).unlink(missing_ok=True)
-        self._meta_path(source_id).unlink(missing_ok=True)
+        self._remove(source_id, notify=False)  # the caller cleans up after a delete
+
+    def expire(self) -> list[str]:
+        """Delete uploads and connections nobody has used for `upload_ttl_days`,
+        with their saved answers. Returns their ids."""
+        self._last_expiry = time.monotonic()
+        ttl_days = self.settings.upload_ttl_days
+        if ttl_days <= 0 or not self.dir.exists():
+            return []
+        cutoff = time.time() - ttl_days * 86400
+        expired = []
+        for meta in self.dir.glob("*.json"):
+            try:
+                stale = meta.stat().st_mtime < cutoff
+            except FileNotFoundError:
+                continue  # deleted meanwhile
+            if stale and _ID.match(meta.stem):
+                self._remove(meta.stem)
+                expired.append(meta.stem)
+        return expired
 
     def clear(self) -> None:
         """Remove every upload (used by tests)."""
@@ -336,6 +376,33 @@ class SourceRegistry:
         shutil.rmtree(self.dir, ignore_errors=True)
 
     # ------------------------------------------------------------ helpers
+
+    def _remove(self, source_id: str, notify: bool = True) -> None:
+        with self._lock:
+            db = self._cache.pop(source_id, None)
+        if db is not None:
+            # Connections a running query still holds stay usable until returned.
+            db.engine.dispose()
+        self._db_path(source_id).unlink(missing_ok=True)
+        self._meta_path(source_id).unlink(missing_ok=True)
+        if notify and self._on_remove:
+            self._on_remove(source_id)
+
+    def _evict(self) -> None:
+        """Close the least recently used databases beyond `max_open_databases`.
+        Called with the lock held. They reopen on their next use."""
+        opened = [k for k in self._cache if k != SAMPLE_ID]
+        for key in opened[: max(0, len(opened) - self.settings.max_open_databases)]:
+            self._cache.pop(key).engine.dispose()
+
+    def _touch(self, source_id: str) -> None:
+        """Record that a database was used, so it doesn't expire."""
+        meta = self._meta_path(source_id)
+        try:
+            if time.time() - meta.stat().st_mtime > TOUCH_EVERY_S:
+                os.utime(meta)
+        except FileNotFoundError:
+            pass
 
     def _uploads(self) -> list[SourceInfo]:
         """Every upload, whoever owns it."""

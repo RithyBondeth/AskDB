@@ -17,14 +17,15 @@ export async function POST(request: Request) {
       // backend too, so it stops calling the model.
       signal: request.signal,
     });
-    return new Response(res.body, {
-      status: res.status,
-      headers: {
-        "content-type": res.headers.get("content-type") ?? "text/event-stream",
-        "cache-control": "no-cache, no-transform",
-        "x-accel-buffering": "no",
-      },
-    });
+    const headers: Record<string, string> = {
+      "content-type": res.headers.get("content-type") ?? "text/event-stream",
+      "cache-control": "no-cache, no-transform",
+      "x-accel-buffering": "no",
+    };
+    // Rate-limited (429) answers say when to try again.
+    const retryAfter = res.headers.get("retry-after");
+    if (retryAfter) headers["retry-after"] = retryAfter;
+    return new Response(res.body, { status: res.status, headers });
   } catch {
     return Response.json(
       {

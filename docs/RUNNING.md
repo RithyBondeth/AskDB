@@ -271,6 +271,7 @@ Limits are set in `backend/.env`:
 | `ASKDB_MAX_UPLOAD_MB` | `50` | Maximum total size of one upload |
 | `ASKDB_MAX_UPLOADS` | `20` | Maximum number of uploads each browser can keep |
 | `ASKDB_MAX_TOTAL_UPLOADS` | `200` | Maximum number of uploads on the server, across everyone |
+| `ASKDB_UPLOAD_TTL_DAYS` | `30` | Uploads and connections nobody has used for this many days are deleted, with their saved answers (`0` keeps them forever) |
 | `ASKDB_UPLOAD_DIR` | `data/uploads` | Where uploads are stored |
 
 Your uploads are private to your browser. There are no accounts: the app gives
@@ -506,6 +507,15 @@ model keys in the app instead of the two key variables.
 | `ASKDB_MAX_TOTAL_UPLOADS` | `200` | Maximum number of uploads on the server |
 | `ASKDB_ALLOW_CONNECTIONS` | `true` | Allow connecting live PostgreSQL/MySQL databases ([section 6](#connect-a-live-database)) |
 | `ASKDB_ALLOW_PRIVATE_HOSTS` | `true` | Set `false` on a public server to block connections to localhost and private networks |
+| `ASKDB_UPLOAD_TTL_DAYS` | `30` | Delete uploads and connections unused for this many days (`0` = never) |
+| `ASKDB_MAX_OPEN_DATABASES` | `32` | Databases kept open in memory; the least recently used are closed and reopen when next used |
+| `ASKDB_ASK_PER_MINUTE` | `10` | Questions per minute per client (`0` = no limit) |
+| `ASKDB_ASK_PER_DAY` | `200` | Questions per day per client on the server's model key. Questions asked with a visitor's own key don't count |
+| `ASKDB_SERVER_KEY_ASKS_PER_DAY` | `1000` | Questions per day on the server's model key from all clients together: the limit that caps your bill (see [Deploying](#deploying-docker-railway)) |
+| `ASKDB_QUERIES_PER_MINUTE` | `30` | Edited-SQL runs, "more rows" pages and CSV exports per minute per client |
+| `ASKDB_DATABASES_PER_HOUR` | `10` | Uploads and new connections per hour per client |
+| `ASKDB_KEY_CHECKS_PER_MINUTE` | `10` | API key checks per minute per client |
+| `ASKDB_TRUSTED_PROXIES` | loopback and private ranges | Proxies whose `X-Forwarded-For` is believed when telling clients apart. Requests from public addresses never are |
 | `ASKDB_EMBEDDING_MODEL` | none | Embedding model for table selection on schemas over 15 tables, e.g. `gemini-embedding-001` (off when unset) |
 | `ASKDB_EMBEDDING_BASE_URL` / `_API_KEY` | the free provider's | Any OpenAI-compatible `/embeddings` API, e.g. `http://localhost:11434/v1` for Ollama |
 | `ASKDB_SUMMARIES` | `model` | Sentence above each answer: `model` (one extra model call), `simple` (template), or `off` |
@@ -598,7 +608,19 @@ its Dockerfile and health check). Then:
 - **frontend:** `ASKDB_API_URL=http://${{backend.RAILWAY_PRIVATE_DOMAIN}}:8000`
   and a public domain.
 - Optional, on the backend: `ASKDB_FREE_API_KEY` (or another provider's key) so
-  visitors can ask without their own key. Every visitor spends it.
+  visitors can ask without their own key. Every visitor spends it, so also set
+  `ASKDB_SERVER_KEY_ASKS_PER_DAY` to the number of questions a day you're
+  willing to pay for.
+
+**Rate limits.** The backend limits each client (questions, queries, uploads; see
+the configuration reference) and tells clients apart by the `X-Forwarded-For`
+header the frontend passes along. Next.js fills that header in with the
+visitor's address, but passes one the browser sent through unchanged, so per-client
+limits only hold against someone faking addresses when a proxy in front sets the
+header itself (nginx with `proxy_set_header X-Forwarded-For $remote_addr;`, or a
+platform edge like Railway's, Vercel's or Cloudflare's). Either way,
+`ASKDB_SERVER_KEY_ASKS_PER_DAY` counts every client together and can't be dodged.
+Counts are kept in memory per backend process and reset on restart.
 
 ---
 
@@ -625,6 +647,8 @@ its Dockerfile and health check). Then:
 | `Blocked: Only SELECT queries are allowed` | Working as intended. AskDB never runs queries that change data. |
 | `This isn't a SQLite database file.` | The file has a `.db`/`.sqlite` name but isn't SQLite. Export it as SQLite, or as CSV. |
 | `Upload limit reached` | Delete an old upload from the database menu, or raise `ASKDB_MAX_UPLOADS`. |
+| `Too many requests: the limit is …` | A per-client limit (`ASKDB_ASK_PER_MINUTE` and friends). Wait the time shown, add your own API key (the daily limits only count the server's key), or raise the limit. |
+| `This server has used today's question budget` | `ASKDB_SERVER_KEY_ASKS_PER_DAY` is used up. Visitors can add their own key; it resets over the next 24 hours. |
 | `This server is full` | The server has `ASKDB_MAX_TOTAL_UPLOADS` uploads. Remove old ones from `backend/data/uploads/` or raise the limit. |
 | An upload disappeared | Uploads belong to the browser that made them. Use the same browser, without clearing site data. |
 | `needs a header row and at least one data row` | The CSV's first line must be column names, followed by data. |
