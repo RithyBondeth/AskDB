@@ -87,8 +87,41 @@ def test_summary_prompt_shows_a_capped_table():
     rows = [[i, f"name {i}"] for i in range(50)]
     prompt = build_summary_prompt("q?", ["id", "name"], rows, truncated=True)
     assert "id | name" in prompt and "name 29" in prompt and "name 30" not in prompt
-    assert "there are more" in prompt
     assert clean_summary('  "**Iron Maiden** has 21."  ') == "Iron Maiden has 21."
+
+
+def test_summary_prompt_says_exactly_how_much_the_model_sees():
+    rows = [[i] for i in range(100)]
+    # Cut off by the row limit: the model sees 30 of the 100 returned, and there are more.
+    cut = build_summary_prompt("q?", ["n"], rows, truncated=True)
+    assert "the first 30 of the 100 rows returned" in cut and "NOT the whole result" in cut
+    # Everything returned, but only 30 shown.
+    partial = build_summary_prompt("q?", ["n"], rows[:60], truncated=False)
+    assert "the first 30 of 60 rows" in partial and "NOT the whole result" in partial
+    # Everything returned and shown.
+    whole = build_summary_prompt("q?", ["n"], rows[:5], truncated=False)
+    assert "(all 5 rows)" in whole and "NOT" not in whole
+
+
+def test_summary_instructions_forbid_partial_maximums_presented_as_complete():
+    from askdb.prompts import SUMMARY_SYSTEM
+
+    assert "only part of the result" in SUMMARY_SYSTEM
+    assert "highest or lowest" in SUMMARY_SYSTEM
+
+
+def test_template_hedges_highest_and_lowest_on_a_cut_off_result():
+    # The real largest invoice (999) is past the rows returned.
+    rows = [[f"INV{i:03d}", 5.0 + (i % 7)] for i in range(100)]
+    text = describe_result(["invoice", "total"], rows, truncated=True)
+    assert text.startswith("Among the first 100 rows (there are more), INV006 has the highest")
+    trend = describe_result(
+        ["month", "revenue"], [[f"2013-{m:02d}", float(m)] for m in range(1, 13)], truncated=True
+    )
+    assert trend.startswith("Among the first 12 rows (there are more), revenue went from 1")
+    # A complete result still states it plainly.
+    whole = describe_result(["invoice", "total"], rows[:7])
+    assert whole.startswith("INV006 has the highest total (11)") and "across 7 rows" in whole
 
 
 class SummarizingGenerator:
