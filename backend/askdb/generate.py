@@ -27,6 +27,17 @@ class CannotAnswerError(GenerationError):
     """The model judged the question unanswerable from the schema."""
 
 
+class ProviderUnavailableError(GenerationError):
+    """The provider couldn't answer right now (rate limit, quota, overload, network).
+    Says nothing about the question, so the eval doesn't score it as wrong."""
+
+
+class ProviderConfigError(GenerationError):
+    """No request can succeed until the setup changes: a missing or rejected key,
+    or a model that doesn't exist or isn't offered to this key. Retrying won't
+    help, and it says nothing about the question, so the eval stops instead."""
+
+
 @dataclass
 class Generation:
     sql: str
@@ -174,7 +185,7 @@ class ClaudeGenerator:
         except TypeError as e:  # raised by the SDK when no credentials are configured
             if "authentication" not in str(e).lower():
                 raise
-            raise GenerationError(
+            raise ProviderConfigError(
                 "No Anthropic credentials found. Set ANTHROPIC_API_KEY (see .env.example)."
             ) from e
         if response.stop_reason == "refusal":

@@ -1,9 +1,10 @@
 """Eval scores for the model menu: how accurate each measured model was.
 
 Reads the result files ``eval/run_eval.py --out`` writes (``eval/results/*.json``).
-A model is labelled only from a full Chinook run, never from a ``--limit`` smoke
-run or a benchmark (Spider, BIRD) run,
-and the most accurate measured model of each provider is marked recommended.
+A model is labelled only from a full Chinook run where the provider answered
+enough questions: never from a ``--limit`` smoke run, a run cut short by rate
+limits or outages, a benchmark (Spider, BIRD) run, or an experiment (``variant``).
+The most accurate measured model of each provider is marked recommended.
 With no result files, nothing is labelled.
 """
 
@@ -14,8 +15,21 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 
-# Smaller runs are smoke tests (--limit), too noisy to label a model with.
+# Fewer answered questions than this (a --limit smoke run, or a run where the
+# provider kept failing) is too noisy to label a model with.
 MIN_QUESTIONS = 20
+
+
+def answered(run: dict) -> int | None:
+    """How many questions the provider actually answered, right or wrong.
+
+    Older result files don't record it. They're trusted only if no question
+    errored, since they can't tell an outage from a wrong answer: None otherwise."""
+    if "answered" in run:
+        return int(run["answered"])
+    if any(r.get("error") for r in run["results"]):
+        return None
+    return int(run.get("total") or len(run["results"]))
 
 
 @dataclass(frozen=True)
@@ -49,20 +63,22 @@ def load_scores(results_dir: Path) -> dict[tuple[str, str], Score]:
     for f in files:
         try:
             run = json.loads(f.read_text())
-            total = int(run.get("total") or len(run["results"]))
+            n = answered(run)
+            if n is None or n < MIN_QUESTIONS:
+                continue
             key = (str(run.get("provider", "claude")), str(run["model"]))
             score = Score(
                 accuracy=float(run["accuracy"]),
-                hits=int(run.get("hits", round(run["accuracy"] * total))),
-                total=total,
+                hits=int(run.get("hits", round(run["accuracy"] * n))),
+                total=n,
                 median_seconds=run.get("median_seconds"),
             )
-        except (ValueError, KeyError, TypeError):
+        except (ValueError, KeyError, TypeError, AttributeError):
             continue  # not a results file, or an older format
-        if total < MIN_QUESTIONS:
-            continue
         if run.get("dataset", "chinook") != "chinook":
             continue  # benchmark runs have their own tables; the menu shows Chinook
+        if run.get("variant"):
+            continue  # an experiment, not the app's own setup
         mtime = f.stat().st_mtime
         if key not in newest or mtime >= newest[key][0]:
             newest[key] = (mtime, score)

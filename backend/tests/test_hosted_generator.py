@@ -7,7 +7,13 @@ import pytest
 
 from askdb.config import Settings
 from askdb.execute import answer
-from askdb.generate import GenerationError, Repair, Turn
+from askdb.generate import (
+    GenerationError,
+    ProviderConfigError,
+    ProviderUnavailableError,
+    Repair,
+    Turn,
+)
 from askdb.hosted import HostedGenerator
 from askdb.pipeline import AskDB
 from askdb.providers import fetch_hosted_models
@@ -85,6 +91,42 @@ def test_missing_key_explains_where_to_get_one():
 def test_http_errors_are_explained(status, body, match):
     gen = make(lambda r: httpx.Response(status, json=body))
     with pytest.raises(GenerationError, match=match):
+        gen.generate("q")
+
+
+@pytest.mark.parametrize(
+    ("status", "unavailable"), [(429, True), (503, True), (401, False), (404, False)]
+)
+def test_outages_are_marked_unavailable(status, unavailable):
+    # The eval leaves these out of the accuracy instead of scoring them as wrong.
+    gen = make(lambda r: httpx.Response(status, json={"error": {"message": "x"}}))
+    with pytest.raises(GenerationError) as exc:
+        gen.generate("q")
+    assert isinstance(exc.value, ProviderUnavailableError) is unavailable
+
+
+@pytest.mark.parametrize(
+    ("status", "body", "kind"),
+    [
+        (429, {"error": {"message": "quota"}}, ProviderUnavailableError),
+        (503, {"error": {"message": "high demand"}}, ProviderUnavailableError),
+        (401, {"error": {"message": "bad key"}}, ProviderConfigError),
+        (400, [{"error": {"message": "API key not valid"}}], ProviderConfigError),
+        (404, {"error": {"message": "no longer available to new users"}}, ProviderConfigError),
+        (400, {"error": {"message": "bad request"}}, GenerationError),
+    ],
+)
+def test_failures_are_sorted_by_whether_retrying_or_fixing_setup_helps(status, body, kind):
+    gen = make(lambda r: httpx.Response(status, json=body))
+    with pytest.raises(GenerationError) as exc:
+        gen.generate("q")
+    assert type(exc.value) is kind
+
+
+def test_missing_key_is_a_setup_problem():
+    gen = make(lambda r: reply("```sql\nSELECT 1\n```"))
+    gen.api_key = None
+    with pytest.raises(ProviderConfigError, match="API key"):
         gen.generate("q")
 
 

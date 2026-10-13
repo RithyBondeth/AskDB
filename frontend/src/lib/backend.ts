@@ -10,10 +10,13 @@ export async function forward(path: string, init?: RequestInit): Promise<Respons
   try {
     const res = await fetch(`${BACKEND_URL}${path}`, { ...init, cache: "no-store" });
     const body = await res.text();
-    return new Response(body, {
-      status: res.status,
-      headers: { "content-type": res.headers.get("content-type") ?? "application/json" },
-    });
+    const headers: Record<string, string> = {
+      "content-type": res.headers.get("content-type") ?? "application/json",
+    };
+    // Rate-limited (429) answers say when to try again.
+    const retryAfter = res.headers.get("retry-after");
+    if (retryAfter) headers["retry-after"] = retryAfter;
+    return new Response(body, { status: res.status, headers });
   } catch {
     return Response.json(
       {
@@ -28,10 +31,12 @@ export async function forward(path: string, init?: RequestInit): Promise<Respons
 }
 
 /** Headers for the backend, plus the ones the browser sent that the backend needs:
- *  the user's own model key and the browser's id (which owns its uploads). */
+ *  the user's own model key, the browser's id (which owns its uploads), and the
+ *  client's address. The backend sees every request coming from this server, so
+ *  without X-Forwarded-For all visitors would share one set of rate limits. */
 export function withClientHeaders(request: Request, headers: Record<string, string> = {}) {
   const out = { ...headers };
-  for (const name of [KEY_HEADER, OWNER_HEADER]) {
+  for (const name of [KEY_HEADER, OWNER_HEADER, "x-forwarded-for"]) {
     const value = request.headers.get(name);
     if (value) out[name] = value;
   }

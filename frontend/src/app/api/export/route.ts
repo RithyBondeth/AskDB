@@ -17,6 +17,9 @@ export async function POST(request: Request) {
     };
     const disposition = res.headers.get("content-disposition");
     if (disposition) headers["content-disposition"] = disposition;
+    // Rate-limited (429) answers say when to try again.
+    const retryAfter = res.headers.get("retry-after");
+    if (retryAfter) headers["retry-after"] = retryAfter;
     return new Response(res.body, { status: res.status, headers });
   } catch {
     return Response.json(

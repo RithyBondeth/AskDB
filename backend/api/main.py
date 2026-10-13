@@ -27,7 +27,7 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from askdb.config import get_settings
@@ -46,6 +46,7 @@ from askdb.providers import (
     list_models,
     resolve_model,
 )
+from askdb.ratelimit import Limit, RateLimited, RateLimiter, Rule, client_ip
 from askdb.sources import SAMPLE_ID, SourceRegistry, valid_owner
 from askdb.store import Store
 from askdb.validate import InvalidSQLError, UnsafeQueryError, validate_sql
@@ -63,7 +64,8 @@ app.add_middleware(
 
 @lru_cache
 def get_registry() -> SourceRegistry:
-    return SourceRegistry()
+    # Uploads that expire take their saved answers with them, as a delete does.
+    return SourceRegistry(on_remove=lambda source_id: get_store().delete_database(source_id))
 
 
 Registry = Annotated[SourceRegistry, Depends(get_registry)]
@@ -76,6 +78,14 @@ def get_store() -> Store:
 
 
 AppStore = Annotated[Store, Depends(get_store)]
+
+
+@lru_cache
+def get_limiter() -> RateLimiter:
+    return RateLimiter()
+
+
+Limiter = Annotated[RateLimiter, Depends(get_limiter)]
 
 # The user's own key for the chosen provider, kept in their browser and sent with
 # each request. It's used for that request only: never stored or logged.
@@ -291,6 +301,67 @@ def _model(db: AskDB, provider: Provider, model: str | None, api_key: str | None
         raise HTTPException(400, ErrorDetail(message=str(e)).model_dump()) from None
 
 
+# ---------------------------------------------------------------- rate limits
+
+
+@app.exception_handler(RateLimited)
+def _rate_limited(_request: Request, e: RateLimited) -> JSONResponse:
+    return JSONResponse(
+        {"detail": ErrorDetail(message=str(e)).model_dump()},
+        status_code=429,
+        headers={"Retry-After": str(int(e.retry_after_s))},
+    )
+
+
+def _client(request: Request, registry: SourceRegistry) -> str:
+    return client_ip(
+        request.client.host if request.client else None,
+        request.headers.get("x-forwarded-for"),
+        registry.settings.trusted_proxies,
+    )
+
+
+def throttle(
+    request: Request, limiter: RateLimiter, registry: SourceRegistry, bucket: str, *limits: Limit
+) -> None:
+    """Count this request against the client's limits, or answer 429."""
+    limiter.check(bucket, _client(request, registry), list(limits))
+
+
+SERVER_BUDGET_USED = (
+    "This server has used today's question budget for its shared model key. "
+    "Add your own API key (the key button at the top of the page) to keep going."
+)
+
+
+def throttle_ask(
+    request: Request,
+    limiter: RateLimiter,
+    registry: SourceRegistry,
+    provider: Provider,
+    api_key: str | None,
+) -> None:
+    """Limits for a question: per client per minute, and, when the server's key
+    pays, per client per day plus a server-wide daily budget."""
+    s, ip = registry.settings, _client(request, registry)
+    rules = [Rule("ask", ip, Limit(s.ask_per_minute, 60))]
+    if not api_key and provider != "local":
+        rules.append(Rule("ask", ip, Limit(s.ask_per_day, 86400)))
+        rules.append(Rule("ask", "*", Limit(s.server_key_asks_per_day, 86400), SERVER_BUDGET_USED))
+    limiter.check_all(rules)
+
+
+def throttle_queries(request: Request, limiter: RateLimiter, registry: SourceRegistry) -> None:
+    """Edited SQL, more rows and exports: database work, so one shared limit."""
+    throttle(request, limiter, registry, "query", Limit(registry.settings.queries_per_minute, 60))
+
+
+def throttle_databases(request: Request, limiter: RateLimiter, registry: SourceRegistry) -> None:
+    """Uploads and connections: disk, and connections to other servers."""
+    limit = Limit(registry.settings.databases_per_hour, 3600)
+    throttle(request, limiter, registry, "database", limit)
+
+
 # ---------------------------------------------------------------- routes
 
 
@@ -338,13 +409,16 @@ def list_databases(registry: Registry, owner: Owner = None) -> dict:
 
 @app.post("/api/databases")
 async def upload_database(
+    request: Request,
     registry: Registry,
+    limiter: Limiter,
     files: Annotated[list[UploadFile], File(description="One SQLite file, or CSV files")],
     name: Annotated[str | None, Form(max_length=80)] = None,
     owner: Owner = None,
 ) -> dict:
     """Create a queryable database from an uploaded SQLite file or CSV files.
     Only the uploading browser (its X-AskDB-Owner id) can see it."""
+    throttle_databases(request, limiter, registry)
     if not valid_owner(owner):
         raise HTTPException(
             400,
@@ -375,10 +449,17 @@ async def upload_database(
 
 
 @app.post("/api/databases/connect")
-def connect_database(req: ConnectRequest, registry: Registry, owner: Owner = None) -> dict:
+def connect_database(
+    req: ConnectRequest,
+    request: Request,
+    registry: Registry,
+    limiter: Limiter,
+    owner: Owner = None,
+) -> dict:
     """Add a live PostgreSQL or MySQL database by connection string. Only this
     browser can see it; the connection string is never sent back."""
     owner = _require_owner(owner)
+    throttle_databases(request, limiter, registry)
     try:
         info = registry.connect(req.url, req.name, owner)
     except UploadError as e:
@@ -403,8 +484,10 @@ def delete_database(
 @app.post("/api/ask", response_model=AskResponse, responses={422: {"model": ErrorDetail}})
 def ask(
     req: AskRequest,
+    request: Request,
     registry: Registry,
     store: AppStore,
+    limiter: Limiter,
     api_key: UserKey = None,
     owner: Owner = None,
 ) -> AskResponse:
@@ -413,6 +496,7 @@ def ask(
     db = resolve(registry, req.database, owner)
     provider = req.provider or db.default_provider
     model = _model(db, provider, req.model, _key(api_key))
+    throttle_ask(request, limiter, registry, provider, _key(api_key))
     try:
         ans = db.ask(
             req.question.strip(),
@@ -446,6 +530,7 @@ def ask_stream(
     request: Request,
     registry: Registry,
     store: AppStore,
+    limiter: Limiter,
     api_key: UserKey = None,
     owner: Owner = None,
 ) -> StreamingResponse:
@@ -459,6 +544,7 @@ def ask_stream(
     db = resolve(registry, req.database, owner)
     provider = req.provider or db.default_provider
     model = _model(db, provider, req.model, _key(api_key))
+    throttle_ask(request, limiter, registry, provider, _key(api_key))
     events: queue.Queue[dict | None] = queue.Queue()
     gone = threading.Event()
 
@@ -526,9 +612,12 @@ def ask_stream(
 
 
 @app.post("/api/run", response_model=AskResponse, responses={422: {"model": ErrorDetail}})
-def run(req: RunRequest, registry: Registry, owner: Owner = None) -> AskResponse:
+def run(
+    req: RunRequest, request: Request, registry: Registry, limiter: Limiter, owner: Owner = None
+) -> AskResponse:
     """Run SQL the user edited. Same read-only validation and connection."""
     db = resolve(registry, req.database, owner)
+    throttle_queries(request, limiter, registry)
     try:
         ans = db.run(req.sql)
     except Exception as e:
@@ -541,9 +630,12 @@ def run(req: RunRequest, registry: Registry, owner: Owner = None) -> AskResponse
 
 
 @app.post("/api/rows")
-def more_rows(req: RowsRequest, registry: Registry, owner: Owner = None) -> dict:
+def more_rows(
+    req: RowsRequest, request: Request, registry: Registry, limiter: Limiter, owner: Owner = None
+) -> dict:
     """The next page of an answer's rows: the same SQL, re-validated, from `offset`."""
     db = resolve(registry, req.database, owner)
+    throttle_queries(request, limiter, registry)
     limit = min(req.limit, db.settings.max_page_rows)
     try:
         result = fetch_rows(req.sql, db.engine, db.schema.dialect, limit, req.offset)
@@ -558,9 +650,16 @@ def more_rows(req: RowsRequest, registry: Registry, owner: Owner = None) -> dict
 
 
 @app.post("/api/export")
-def export_csv(req: ExportRequest, registry: Registry, owner: Owner = None) -> StreamingResponse:
+def export_csv(
+    req: ExportRequest,
+    request: Request,
+    registry: Registry,
+    limiter: Limiter,
+    owner: Owner = None,
+) -> StreamingResponse:
     """Every row of an answer as CSV (up to ASKDB_EXPORT_ROW_LIMIT), streamed."""
     db = resolve(registry, req.database, owner)
+    throttle_queries(request, limiter, registry)
     try:
         columns, rows = export_rows(
             req.sql, db.engine, db.schema.dialect, db.settings.export_row_limit
@@ -691,11 +790,19 @@ class KeyCheckRequest(BaseModel):
 
 
 @app.post("/api/keys/check")
-def check_key(req: KeyCheckRequest, api_key: UserKey = None) -> dict:
+def check_key(
+    req: KeyCheckRequest,
+    request: Request,
+    registry: Registry,
+    limiter: Limiter,
+    api_key: UserKey = None,
+) -> dict:
     """Try a key with a cheap call that lists models (no tokens are used)."""
     key = _key(api_key)
     if not key:
         return {"ok": False, "message": "Paste a key first."}
+    limit = Limit(registry.settings.key_checks_per_minute, 60)
+    throttle(request, limiter, registry, "keycheck", limit)
     settings = get_settings()
     try:
         if req.provider in HOSTED:
