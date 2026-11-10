@@ -16,6 +16,24 @@
 
 </div>
 
+<!-- product-images:start -->
+
+## Product preview
+
+<p align="center">
+  <img src="docs/product-images/hero.png" alt="AskDB — Plain-language questions. Validated, read-only SQL." width="100%">
+</p>
+
+<table>
+<tr>
+  <td width="33%"><img src="docs/product-images/feature-01.png" alt="Your data. Your questions. — Upload SQLite or CSV files, or connect PostgreSQL and MySQL." width="100%"></td>
+  <td width="33%"><img src="docs/product-images/feature-02.png" alt="Read-only. By design. — Two checks stand between a question and your database." width="100%"></td>
+  <td width="33%"><img src="docs/product-images/feature-03.png" alt="Follow every repair. — Inspect the SQL, review each attempt, and see how errors are corrected." width="100%"></td>
+</tr>
+</table>
+
+<!-- product-images:end -->
+
 <!-- Demo GIF: start the app with a model key, run `uv run scripts/record_demo.py`
      from the repo root, then replace this comment with ![AskDB demo](docs/demo.gif) -->
 
@@ -45,13 +63,13 @@ It works with a **free hosted model** by default (Google Gemini's free tier), wi
 
 ## Tech Stack
 
-| Area | Technology |
-| --- | --- |
-| Backend | Python 3.11+, FastAPI, SQLAlchemy, sqlglot, uv |
-| Frontend | Next.js (App Router), TypeScript, Tailwind CSS, Recharts |
-| Models | Anthropic Claude, Google Gemini, Groq, OpenRouter, OpenAI, Ollama |
-| Databases | SQLite (bundled Chinook sample), PostgreSQL, MySQL/MariaDB |
-| Testing | Pytest, Ruff, Vitest, Playwright smoke tests, GitHub Actions |
+| Area      | Technology                                                        |
+| --------- | ----------------------------------------------------------------- |
+| Backend   | Python 3.11+, FastAPI, SQLAlchemy, sqlglot, uv                    |
+| Frontend  | Next.js (App Router), TypeScript, Tailwind CSS, Recharts          |
+| Models    | Anthropic Claude, Google Gemini, Groq, OpenRouter, OpenAI, Ollama |
+| Databases | SQLite (bundled Chinook sample), PostgreSQL, MySQL/MariaDB        |
+| Testing   | Pytest, Ruff, Vitest, Playwright smoke tests, GitHub Actions      |
 
 ## How It Works
 
@@ -75,14 +93,14 @@ question
 [6 present: summary + table + chart]
 ```
 
-| Stage | Code |
-| --- | --- |
-| 1. Introspection | [`backend/askdb/schema.py`](backend/askdb/schema.py) |
-| 2. Schema linking | [`backend/askdb/linking.py`](backend/askdb/linking.py) |
-| 3. Generation | [`generate.py`](backend/askdb/generate.py), [`hosted.py`](backend/askdb/hosted.py), [`local.py`](backend/askdb/local.py), [`prompts.py`](backend/askdb/prompts.py) |
-| 4. Validation | [`backend/askdb/validate.py`](backend/askdb/validate.py) |
-| 5. Execute and self-correct | [`execute.py`](backend/askdb/execute.py), [`db.py`](backend/askdb/db.py) |
-| 6. Presentation | [`backend/askdb/present.py`](backend/askdb/present.py) and the Next.js UI |
+| Stage                       | Code                                                                                                                                                               |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1. Introspection            | [`backend/askdb/schema.py`](backend/askdb/schema.py)                                                                                                               |
+| 2. Schema linking           | [`backend/askdb/linking.py`](backend/askdb/linking.py)                                                                                                             |
+| 3. Generation               | [`generate.py`](backend/askdb/generate.py), [`hosted.py`](backend/askdb/hosted.py), [`local.py`](backend/askdb/local.py), [`prompts.py`](backend/askdb/prompts.py) |
+| 4. Validation               | [`backend/askdb/validate.py`](backend/askdb/validate.py)                                                                                                           |
+| 5. Execute and self-correct | [`execute.py`](backend/askdb/execute.py), [`db.py`](backend/askdb/db.py)                                                                                           |
+| 6. Presentation             | [`backend/askdb/present.py`](backend/askdb/present.py) and the Next.js UI                                                                                          |
 
 ## Getting Started
 
@@ -143,21 +161,21 @@ cd frontend && npm run lint && npm run typecheck && npm test && npm run build
 
 ## API
 
-| Method | Path | Description |
-| --- | --- | --- |
-| `POST` | `/api/ask` | Question → SQL, explanation, rows, chart spec, and every attempt |
-| `POST` | `/api/ask/stream` | Same as `/api/ask`, streamed as Server-Sent Events |
-| `POST` | `/api/run` | Run edited SQL behind the same read-only validation |
-| `POST` | `/api/rows` | Next page of an answer's rows |
-| `POST` | `/api/export` | Every row as streamed CSV |
-| `GET` / `POST` / `DELETE` | `/api/databases` | List, upload, or delete databases |
-| `POST` | `/api/databases/connect` | Connect a live PostgreSQL or MySQL database |
-| `GET` / `DELETE` | `/api/history` | Saved answers |
-| `POST` | `/api/history/{id}/share` | Share a saved answer |
-| `POST` | `/api/feedback` | Store 👍/👎 feedback |
-| `GET` | `/api/schema` | Tables, columns, and suggested questions |
-| `POST` | `/api/keys/check` | Check that a model key works |
-| `GET` | `/api/health` | Status, dialect, and available models |
+| Method                    | Path                      | Description                                                      |
+| ------------------------- | ------------------------- | ---------------------------------------------------------------- |
+| `POST`                    | `/api/ask`                | Question → SQL, explanation, rows, chart spec, and every attempt |
+| `POST`                    | `/api/ask/stream`         | Same as `/api/ask`, streamed as Server-Sent Events               |
+| `POST`                    | `/api/run`                | Run edited SQL behind the same read-only validation              |
+| `POST`                    | `/api/rows`               | Next page of an answer's rows                                    |
+| `POST`                    | `/api/export`             | Every row as streamed CSV                                        |
+| `GET` / `POST` / `DELETE` | `/api/databases`          | List, upload, or delete databases                                |
+| `POST`                    | `/api/databases/connect`  | Connect a live PostgreSQL or MySQL database                      |
+| `GET` / `DELETE`          | `/api/history`            | Saved answers                                                    |
+| `POST`                    | `/api/history/{id}/share` | Share a saved answer                                             |
+| `POST`                    | `/api/feedback`           | Store 👍/👎 feedback                                             |
+| `GET`                     | `/api/schema`             | Tables, columns, and suggested questions                         |
+| `POST`                    | `/api/keys/check`         | Check that a model key works                                     |
+| `GET`                     | `/api/health`             | Status, dialect, and available models                            |
 
 The user's own model key travels in the `X-AskDB-Api-Key` header and overrides the server key for that request.
 
@@ -166,11 +184,13 @@ The user's own model key travels in the `X-AskDB-Api-Key` header and overrides t
 Execution accuracy on 35 Chinook questions (`eval/compare.py --readme` regenerates this table):
 
 <!-- eval-table:start -->
-| Model | Provider | Execution accuracy | Fixed by self-correction | Median s/question |
-| --- | --- | --- | --- | --- |
-| `gemini-flash-latest` | free | _not measured yet_ | | |
-| `claude-opus-5-5` | claude | _not measured yet_ | | |
-| `Arctic-Text2SQL-R1-7B` (Q4_K_M) | local | _not measured yet_ | | |
+
+| Model                            | Provider | Execution accuracy | Fixed by self-correction | Median s/question |
+| -------------------------------- | -------- | ------------------ | ------------------------ | ----------------- |
+| `gemini-flash-latest`            | free     | _not measured yet_ |                          |                   |
+| `claude-opus-5-5`                | claude   | _not measured yet_ |                          |                   |
+| `Arctic-Text2SQL-R1-7B` (Q4_K_M) | local    | _not measured yet_ |                          |                   |
+
 <!-- eval-table:end -->
 
 ```bash
@@ -197,17 +217,21 @@ uv run python eval/compare.py --dataset spider-dev-200 --readme
 **Spider dev** (subset):
 
 <!-- eval-table:spider:start -->
-| Model | Provider | Execution accuracy | Fixed by self-correction | Median s/question |
-| --- | --- | --- | --- | --- |
-| _not measured yet_ | | | | |
+
+| Model              | Provider | Execution accuracy | Fixed by self-correction | Median s/question |
+| ------------------ | -------- | ------------------ | ------------------------ | ----------------- |
+| _not measured yet_ |          |                    |                          |                   |
+
 <!-- eval-table:spider:end -->
 
 **BIRD dev** (subset):
 
 <!-- eval-table:bird:start -->
-| Model | Provider | Execution accuracy | Fixed by self-correction | Median s/question |
-| --- | --- | --- | --- | --- |
-| _not measured yet_ | | | | |
+
+| Model              | Provider | Execution accuracy | Fixed by self-correction | Median s/question |
+| ------------------ | -------- | ------------------ | ------------------------ | ----------------- |
+| _not measured yet_ |          |                    |                          |                   |
+
 <!-- eval-table:bird:end -->
 
 ## Security Notes
